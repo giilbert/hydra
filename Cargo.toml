@@ -1,0 +1,2 @@
+[workspace]
+members = ["hydra-container", "hydra-server", "hydra-container/protocol"]

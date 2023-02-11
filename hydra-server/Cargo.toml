@@ -1,0 +1,19 @@
+[package]
+name = "hydra-server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.69"
+axum = { version = "0.6.4", features = ["ws", "macros"] }
+bollard = "0.14.0"
+env_logger = "0.10.0"
+futures-util = "0.3.26"
+log = "0.4.17"
+serde = { version = "1.0.152", features = ["serde_derive"] }
+serde_json = "1.0.93"
+tokio = { version = "1.25.0", features = ["full"] }
+tokio-tungstenite = "0.18.0"
+protocol = { path = "../hydra-container/protocol" }
