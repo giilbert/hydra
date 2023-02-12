@@ -1,20 +1,20 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use bollard::{container, service::HostConfig, Docker};
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use lazy_static::lazy_static;
-use protocol::{ContainerSent, HostSent};
+use parking_lot::Mutex;
+use protocol::{ContainerRpcRequest, ContainerSent, HostSent};
+use serde_json::Value;
 use tokio::{
     fs,
     net::{UnixListener, UnixStream},
     sync::mpsc,
 };
-use tokio_tungstenite::{
-    accept_async,
-    tungstenite::{Message, WebSocket},
-    WebSocketStream,
-};
+use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
+
+use crate::rpc::RpcRecords;
 
 lazy_static! {
     static ref DOCKER: Docker = Docker::connect_with_local_defaults().unwrap();
@@ -24,8 +24,10 @@ pub struct Container {
     id: Uuid,
     commands_tx: mpsc::Sender<ContainerCommands>,
     socket_dir: PathBuf,
+    rpc_records: Arc<Mutex<RpcRecords>>,
 }
 
+#[derive(Clone, Debug)]
 pub enum ContainerCommands {
     SendMessage(HostSent),
     Stop,
@@ -78,38 +80,94 @@ impl Container {
 
         let (commands_tx, commands_rx) = mpsc::channel::<ContainerCommands>(32);
 
-        tokio::task::spawn(run_container(ws_stream, commands_rx));
+        let rpc_records = Arc::new(Mutex::new(RpcRecords::new()));
+
+        tokio::task::spawn(run_container(
+            res.id,
+            ws_stream,
+            commands_rx,
+            rpc_records.clone(),
+        ));
 
         Ok(Self {
             id,
             commands_tx,
             socket_dir,
+            rpc_records,
         })
     }
 
-    pub fn commands_tx(&self) -> mpsc::Sender<ContainerCommands> {
-        self.commands_tx.clone()
+    pub async fn stop(&mut self) -> anyhow::Result<()> {
+        self.commands_tx.send(ContainerCommands::Stop).await?;
+        fs::remove_dir_all(&self.socket_dir).await?;
+
+        Ok(())
+    }
+
+    pub async fn rpc(&mut self, req: ContainerRpcRequest) -> anyhow::Result<Result<Value, String>> {
+        let id = Uuid::new_v4();
+        let mut rpc_records = self.rpc_records.lock();
+
+        self.commands_tx
+            .send(ContainerCommands::SendMessage(HostSent::RpcRequest {
+                id,
+                req,
+            }))
+            .await?;
+
+        let response = rpc_records.await_response(id).await?;
+
+        drop(rpc_records);
+
+        Ok(response.await?)
     }
 }
 
 async fn run_container(
+    container_id: String,
     ws_stream: WebSocketStream<UnixStream>,
     mut commands_rx: mpsc::Receiver<ContainerCommands>,
+    rpc_records: Arc<Mutex<RpcRecords>>,
 ) -> anyhow::Result<()> {
-    let (tx, mut rx) = ws_stream.split();
+    let (mut tx, mut rx) = ws_stream.split();
+
+    tokio::spawn(async move {
+        let mut log_stream = DOCKER.logs(
+            &container_id,
+            Some(container::LogsOptions::<String> {
+                follow: true,
+                stdout: true,
+                stderr: true,
+                ..Default::default()
+            }),
+        );
+
+        while let Some(Ok(msg)) = log_stream.next().await {
+            log::info!("[{}]: {}", &container_id[..5], &msg);
+        }
+    });
 
     loop {
         tokio::select! {
             Some(msg) = rx.next() => {
                 match msg {
-                    // Ok(msg) => log::info!("{msg:?}"),
                     Ok(msg) => {
                         match msg {
                             Message::Binary(bin) => {
                                 let msg = rmp_serde::from_slice::<ContainerSent>(&bin).unwrap();
-                                log::info!("recv: {:?}", msg);
+
+                                match msg {
+                                    ContainerSent::RpcResponse { id, result } => {
+                                        let response = serde_json::from_str::<Result<Value, String>>(&result).unwrap();
+                                        let mut rpc_records = rpc_records.lock();
+                                        if let Err(err) = rpc_records.handle_incoming(id, response) {
+                                            log::error!("Error handling rpc response: {err:#?}");
+                                        };
+                                    },
+                                    _ => (),
+                                }
                             },
-                            msg => log::info!("recv other than binary: {:?}", msg)
+                            msg => log::warn!("recv other than binary: {:?}", msg)
                         }
                     },
                     Err(e) => {
@@ -120,7 +178,10 @@ async fn run_container(
             }
             Some(msg) = commands_rx.recv() => {
                 match msg {
-                    ContainerCommands::SendMessage(msg) => log::info!("Sending: {:?}", msg),
+                    ContainerCommands::SendMessage(msg) => {
+                        let bin = rmp_serde::to_vec_named(&msg).unwrap();
+                        tx.send(Message::Binary(bin)).await?;
+                    }
                     ContainerCommands::Stop => {
                         log::info!("Stopping");
                         break;

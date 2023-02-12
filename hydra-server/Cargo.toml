@@ -20,3 +20,4 @@ protocol = { path = "../hydra-container/protocol" }
 lazy_static = "1.4.0"
 uuid = { version = "1.3.0", features = ["v4"] }
 rmp-serde = "1.1.1"
+parking_lot = "0.12.1"
