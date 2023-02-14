@@ -33,7 +33,6 @@ impl State {
     }
 
     pub fn remove_pty(&mut self, id: u64) {
-        log::info!("Removing pty {}", id);
         self.ptys.remove(&id);
     }
 }

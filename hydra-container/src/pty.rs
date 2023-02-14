@@ -163,7 +163,7 @@ pub async fn create(command: CommandBuilder) -> anyhow::Result<Pty> {
         command,
         portable_pty::PtySize {
             rows: 30,
-            cols: 40,
+            cols: 90,
             pixel_width: 0,
             pixel_height: 0,
         },
@@ -185,8 +185,6 @@ pub async fn create(command: CommandBuilder) -> anyhow::Result<Pty> {
             }
         }
 
-        log::info!("pty {id} commands ended");
-
         Ok::<_, anyhow::Error>(())
     });
 
@@ -194,8 +192,6 @@ pub async fn create(command: CommandBuilder) -> anyhow::Result<Pty> {
         while let Some(x) = rx.next().await {
             output_tx.send(x).await?;
         }
-
-        log::info!("pty {id} output ended");
 
         Ok::<_, anyhow::Error>(())
     });

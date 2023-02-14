@@ -10,28 +10,33 @@ async fn main() -> anyhow::Result<()> {
     log::info!("starting container");
     let mut container = Container::new().await?;
 
-    let now = std::time::Instant::now();
-
-    let response = container
+    let _response = container
         .rpc(protocol::ContainerRpcRequest {
             procedure: protocol::ContainerRpcProcedure::PtyCreate,
             parameters: serde_json::json!({}),
         })
         .await?;
 
-    log::info!("rpc response: {:?}", response);
-
-    let elapsed = now.elapsed();
-    log::info!("elapsed: {:?}", elapsed);
-
     tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
-    let response = container
+    let _response = container
         .rpc(protocol::ContainerRpcRequest {
             procedure: protocol::ContainerRpcProcedure::PtyInput,
             parameters: serde_json::json!({
                 "id": 0,
-                "input": "exit\n",
+                "input": "cd /\n",
+            }),
+        })
+        .await?;
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    let _response = container
+        .rpc(protocol::ContainerRpcRequest {
+            procedure: protocol::ContainerRpcProcedure::PtyInput,
+            parameters: serde_json::json!({
+                "id": 0,
+                "input": "ls -a\n",
             }),
         })
         .await?;

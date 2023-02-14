@@ -22,6 +22,7 @@ lazy_static! {
 
 pub struct Container {
     id: Uuid,
+    docker_id: String,
     commands_tx: mpsc::Sender<ContainerCommands>,
     socket_dir: PathBuf,
     rpc_records: Arc<Mutex<RpcRecords>>,
@@ -86,7 +87,7 @@ impl Container {
         let rpc_records = Arc::new(Mutex::new(RpcRecords::new()));
 
         tokio::task::spawn(run_container(
-            res.id,
+            res.id.clone(),
             ws_stream,
             commands_rx,
             rpc_records.clone(),
@@ -94,6 +95,7 @@ impl Container {
 
         Ok(Self {
             id,
+            docker_id: res.id,
             commands_tx,
             socket_dir,
             rpc_records,
@@ -101,6 +103,8 @@ impl Container {
     }
 
     pub async fn stop(&mut self) -> anyhow::Result<()> {
+        log::info!("Stopping container {}", &self.docker_id[..5]);
+
         self.commands_tx.send(ContainerCommands::Stop).await?;
         fs::remove_dir_all(&self.socket_dir).await?;
 
@@ -146,7 +150,7 @@ async fn run_container(
         );
 
         while let Some(Ok(msg)) = log_stream.next().await {
-            log::info!("[{}]: {}", &container_id[..5], &msg);
+            log::info!("[{}]: {}", &container_id[..5], &msg.to_string().trim_end());
         }
     });
 
@@ -168,7 +172,7 @@ async fn run_container(
                                         };
                                     },
                                     ContainerSent::PtyOutput { id, output } => {
-                                        log::info!("pty output: [{id}] {output}");
+                                        log::info!("pty [{id}]: {}", output.trim_end());
                                     },
                                     _ => (),
                                 }
