@@ -1,16 +1,24 @@
+use std::{collections::HashMap, sync::Arc};
+
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
+use parking_lot::{Mutex, RwLock};
 use protocol::{ContainerSent, HostSent};
 use tokio::{net::UnixStream, sync::mpsc};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
-use crate::procedures::handle_rpc_procedure;
+use crate::{
+    procedures::handle_rpc_procedure,
+    pty::{Pty, PtyCommands},
+    state::State,
+};
 
 #[derive(Debug)]
 pub enum Command {
     Send(Message),
+    RemovePty(u64),
 }
 
 pub struct Commands {
@@ -18,6 +26,7 @@ pub struct Commands {
     ws_rx: SplitStream<WebSocketStream<UnixStream>>,
     commands_rx: mpsc::Receiver<Command>,
     pub commands_tx: mpsc::Sender<Command>,
+    state: Arc<Mutex<State>>,
 }
 
 impl Commands {
@@ -26,6 +35,7 @@ impl Commands {
         let (commands_tx, commands_rx) = mpsc::channel(32);
 
         Self {
+            state: Arc::new(Mutex::new(State::new(commands_tx.clone()))),
             ws_tx,
             ws_rx,
             commands_rx,
@@ -34,6 +44,7 @@ impl Commands {
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
+        let state = self.state.clone();
         tokio::spawn(async move {
             while let Some(command) = self.commands_rx.recv().await {
                 match command {
@@ -41,6 +52,9 @@ impl Commands {
                         if let Err(e) = self.ws_tx.send(msg).await {
                             log::error!("Failed to send message: {}", e);
                         }
+                    }
+                    Command::RemovePty(id) => {
+                        state.lock().remove_pty(id);
                     }
                 }
             }
@@ -59,7 +73,8 @@ impl Commands {
 
             match msg {
                 HostSent::RpcRequest { id, req } => {
-                    let res = handle_rpc_procedure(req);
+                    let res =
+                        handle_rpc_procedure(&self.commands_tx, req, self.state.clone()).await;
 
                     let res = match res {
                         Ok(r) => r,

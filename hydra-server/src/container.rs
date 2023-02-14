@@ -55,6 +55,9 @@ impl Container {
                     host_config: Some(HostConfig {
                         binds: Some(vec![format!("{}:/run/hydra", socket_dir.to_string_lossy())]),
                         auto_remove: Some(true),
+                        cpu_quota: Some(20000),
+                        cpuset_cpus: Some("0-1".into()),
+                        memory: Some(64 * 1000 * 1000),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -163,6 +166,9 @@ async fn run_container(
                                         if let Err(err) = rpc_records.handle_incoming(id, response) {
                                             log::error!("Error handling rpc response: {err:#?}");
                                         };
+                                    },
+                                    ContainerSent::PtyOutput { id, output } => {
+                                        log::info!("pty output: [{id}] {output}");
                                     },
                                     _ => (),
                                 }
