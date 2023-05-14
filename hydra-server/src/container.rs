@@ -8,7 +8,7 @@ use serde_json::Value;
 use tokio::{
     fs,
     net::{UnixListener, UnixStream},
-    sync::{mpsc, oneshot, Mutex},
+    sync::{mpsc, watch, Mutex},
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
@@ -27,6 +27,7 @@ pub struct Container {
     pub container_rx: Option<mpsc::Receiver<ContainerSent>>,
     socket_dir: PathBuf,
     rpc_records: Arc<Mutex<RpcRecords>>,
+    stop_rx: watch::Receiver<()>,
 }
 
 #[derive(Clone, Debug)]
@@ -40,6 +41,7 @@ impl Container {
         let id = Uuid::new_v4();
         let cwd = std::env::current_dir()?;
         let socket_dir = cwd.join(format!("sockets/{}", id));
+        let (stop, mut stop_rx) = watch::channel(());
 
         fs::create_dir_all(&socket_dir).await?;
 
@@ -96,6 +98,8 @@ impl Container {
             rpc_records.clone(),
             container_tx,
             socket_dir.clone(),
+            stop,
+            stop_rx.clone(),
         ));
 
         Ok(Self {
@@ -105,6 +109,7 @@ impl Container {
             socket_dir,
             rpc_records,
             container_rx: Some(container_rx),
+            stop_rx,
         })
     }
 
@@ -126,8 +131,11 @@ impl Container {
             }))
             .await?;
 
-        let response = self.rpc_records.lock().await.await_response(id).await?;
-        let res = response.await?;
+        let response = tokio::select! {
+            d = self.rpc_records.lock().await.await_response(id).await? => d,
+            _ = self.stop_rx.changed() => anyhow::bail!("container stopped during RPC")
+        };
+        let res = response?;
 
         Ok(res)
     }
@@ -140,9 +148,10 @@ async fn run_container(
     rpc_records: Arc<Mutex<RpcRecords>>,
     container_tx: mpsc::Sender<ContainerSent>,
     socket_dir: PathBuf,
+    stop: watch::Sender<()>,
+    mut stop_rx: watch::Receiver<()>,
 ) -> anyhow::Result<()> {
     let (mut tx, mut rx) = ws_stream.split();
-    let (stop, mut stop_rx) = oneshot::channel();
 
     let container_id_clone = container_id.clone();
     tokio::spawn(async move {
@@ -165,7 +174,7 @@ async fn run_container(
                         &msg.to_string().trim_end()
                     );
                 }
-                _ = &mut stop_rx => {
+                _ = stop_rx.changed() => {
                     break;
                 }
             }
