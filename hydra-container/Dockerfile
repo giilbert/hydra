@@ -21,6 +21,9 @@ RUN cargo build --release \
     && rm -rf /usr/src/hydra-container
 
 FROM debian:latest
+RUN apt update \
+    && apt install -y libssl-dev ca-certificates python3 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /bin/hydra-container /bin/hydra-container
 

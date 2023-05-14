@@ -6,7 +6,7 @@ use futures_util::{
 };
 use parking_lot::{Mutex, RwLock};
 use protocol::{ContainerSent, HostSent};
-use tokio::{net::UnixStream, sync::mpsc};
+use tokio::{fs, net::UnixStream, sync::mpsc};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
 use crate::{
@@ -58,6 +58,8 @@ impl Commands {
                     }
                 }
             }
+
+            Ok::<_, anyhow::Error>(())
         });
 
         while let Some(Ok(Message::Binary(msg))) = self.ws_rx.next().await {

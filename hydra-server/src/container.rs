@@ -3,13 +3,12 @@ use std::{path::PathBuf, sync::Arc};
 use bollard::{container, service::HostConfig, Docker};
 use futures_util::{SinkExt, StreamExt};
 use lazy_static::lazy_static;
-use parking_lot::Mutex;
 use protocol::{ContainerRpcRequest, ContainerSent, HostSent};
 use serde_json::Value;
 use tokio::{
     fs,
     net::{UnixListener, UnixStream},
-    sync::mpsc,
+    sync::{mpsc, Mutex},
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
@@ -20,10 +19,12 @@ lazy_static! {
     static ref DOCKER: Docker = Docker::connect_with_local_defaults().unwrap();
 }
 
+#[derive(Debug)]
 pub struct Container {
-    id: Uuid,
+    _id: Uuid,
     docker_id: String,
     commands_tx: mpsc::Sender<ContainerCommands>,
+    pub container_rx: Option<mpsc::Receiver<ContainerSent>>,
     socket_dir: PathBuf,
     rpc_records: Arc<Mutex<RpcRecords>>,
 }
@@ -85,20 +86,23 @@ impl Container {
         let (commands_tx, commands_rx) = mpsc::channel::<ContainerCommands>(32);
 
         let rpc_records = Arc::new(Mutex::new(RpcRecords::new()));
+        let (container_tx, container_rx) = mpsc::channel::<ContainerSent>(64);
 
         tokio::task::spawn(run_container(
             res.id.clone(),
             ws_stream,
             commands_rx,
             rpc_records.clone(),
+            container_tx,
         ));
 
         Ok(Self {
-            id,
+            _id: id,
             docker_id: res.id,
             commands_tx,
             socket_dir,
             rpc_records,
+            container_rx: Some(container_rx),
         })
     }
 
@@ -113,7 +117,6 @@ impl Container {
 
     pub async fn rpc(&mut self, req: ContainerRpcRequest) -> anyhow::Result<Result<Value, String>> {
         let id = Uuid::new_v4();
-        let mut rpc_records = self.rpc_records.lock();
 
         self.commands_tx
             .send(ContainerCommands::SendMessage(HostSent::RpcRequest {
@@ -122,11 +125,10 @@ impl Container {
             }))
             .await?;
 
-        let response = rpc_records.await_response(id).await?;
+        let response = self.rpc_records.lock().await.await_response(id).await?;
+        let res = response.await?;
 
-        drop(rpc_records);
-
-        Ok(response.await?)
+        Ok(res)
     }
 }
 
@@ -135,6 +137,7 @@ async fn run_container(
     ws_stream: WebSocketStream<UnixStream>,
     mut commands_rx: mpsc::Receiver<ContainerCommands>,
     rpc_records: Arc<Mutex<RpcRecords>>,
+    container_tx: mpsc::Sender<ContainerSent>,
 ) -> anyhow::Result<()> {
     let (mut tx, mut rx) = ws_stream.split();
 
@@ -166,15 +169,12 @@ async fn run_container(
                                 match msg {
                                     ContainerSent::RpcResponse { id, result } => {
                                         let response = serde_json::from_str::<Result<Value, String>>(&result).unwrap();
-                                        let mut rpc_records = rpc_records.lock();
+                                        let mut rpc_records = rpc_records.lock().await;
                                         if let Err(err) = rpc_records.handle_incoming(id, response) {
                                             log::error!("Error handling rpc response: {err:#?}");
                                         };
                                     },
-                                    ContainerSent::PtyOutput { id, output } => {
-                                        log::info!("pty [{id}]: {}", output.trim_end());
-                                    },
-                                    _ => (),
+                                    _ => container_tx.send(msg).await?,
                                 }
                             },
                             msg => log::warn!("recv other than binary: {:?}", msg)
@@ -193,7 +193,6 @@ async fn run_container(
                         tx.send(Message::Binary(bin)).await?;
                     }
                     ContainerCommands::Stop => {
-                        log::info!("Stopping");
                         break;
                     }
                 }

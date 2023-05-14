@@ -4,6 +4,7 @@ use tokio::sync::oneshot;
 
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub struct RpcRecords {
     pub records: HashMap<Uuid, oneshot::Sender<Result<Value, String>>>,
 }

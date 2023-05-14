@@ -1,49 +1,45 @@
-mod container;
-mod rpc;
+use std::{collections::HashMap, sync::Arc};
 
+use axum::{routing::post, Router};
 use container::Container;
+use execute::execute;
+use parking_lot::RwLock;
+use run_request::RunRequest;
+use tower_http::cors::{Any, CorsLayer};
+use uuid::Uuid;
+
+use crate::execute::execute_websocket;
+
+mod container;
+mod execute;
+mod rpc;
+mod run_request;
+
+type AppState = Arc<RwLock<AppStateInner>>;
+
+#[derive(Default, Debug)]
+pub struct AppStateInner {
+    pub run_requests: HashMap<Uuid, RunRequest>,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    log::info!("starting container");
-    let mut container = Container::new().await?;
+    let router = Router::new()
+        .route("/execute", post(execute).get(execute_websocket))
+        .with_state(AppState::default())
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_headers(Any)
+                .allow_methods(Any),
+        );
 
-    let _response = container
-        .rpc(protocol::ContainerRpcRequest {
-            procedure: protocol::ContainerRpcProcedure::PtyCreate,
-            parameters: serde_json::json!({}),
-        })
+    log::info!("Server listening on 0.0.0.0:3001");
+    axum::Server::bind(&"0.0.0.0:3001".parse()?)
+        .serve(router.into_make_service())
         .await?;
-
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-
-    let _response = container
-        .rpc(protocol::ContainerRpcRequest {
-            procedure: protocol::ContainerRpcProcedure::PtyInput,
-            parameters: serde_json::json!({
-                "id": 0,
-                "input": "cd /\n",
-            }),
-        })
-        .await?;
-
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-    let _response = container
-        .rpc(protocol::ContainerRpcRequest {
-            procedure: protocol::ContainerRpcProcedure::PtyInput,
-            parameters: serde_json::json!({
-                "id": 0,
-                "input": "ls -a\n",
-            }),
-        })
-        .await?;
-
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-
-    container.stop().await?;
 
     Ok(())
 }

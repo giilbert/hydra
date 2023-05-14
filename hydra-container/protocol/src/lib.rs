@@ -18,6 +18,7 @@ pub enum HostSent {
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub enum ContainerRpcProcedure {
+    SetupFromOptions,
     PtyCreate,
     PtyInput,
 }
@@ -30,3 +31,14 @@ pub struct ContainerRpcRequest {
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ContainerRpcResponse {}
+
+#[derive(Serialize, Deserialize)]
+pub struct File {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ExecuteOptions {
+    pub files: Vec<File>,
+}

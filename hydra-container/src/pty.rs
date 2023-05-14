@@ -31,6 +31,7 @@ impl PtyStream {
     pub fn new(mut read: Box<dyn Read + Send>) -> Self {
         let (tx, mut rx) = mpsc::channel::<String>(100);
 
+        // TODO: uncurse this
         tokio::task::spawn_blocking(move || {
             let mut buf = [0; 1024];
 
