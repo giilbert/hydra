@@ -16,18 +16,20 @@ use uuid::Uuid;
 use crate::rpc::RpcRecords;
 
 lazy_static! {
-    static ref DOCKER: Docker = Docker::connect_with_local_defaults().unwrap();
+    static ref DOCKER: Docker =
+        Docker::connect_with_local_defaults().expect("unable to connect to docker");
 }
 
 #[derive(Debug)]
 pub struct Container {
     _id: Uuid,
-    docker_id: String,
+    pub docker_id: String,
     commands_tx: mpsc::Sender<ContainerCommands>,
     pub container_rx: Option<mpsc::Receiver<ContainerSent>>,
     socket_dir: PathBuf,
     rpc_records: Arc<Mutex<RpcRecords>>,
-    stop_rx: watch::Receiver<()>,
+    pub stop_rx: watch::Receiver<()>,
+    pub stopped: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -41,7 +43,7 @@ impl Container {
         let id = Uuid::new_v4();
         let cwd = std::env::current_dir()?;
         let socket_dir = cwd.join(format!("sockets/{}", id));
-        let (stop, mut stop_rx) = watch::channel(());
+        let (stop, stop_rx) = watch::channel(());
 
         fs::create_dir_all(&socket_dir).await?;
 
@@ -67,15 +69,11 @@ impl Container {
                     ..Default::default()
                 },
             )
-            .await
-            .unwrap();
+            .await?;
 
         log::info!("Created container: {}", res.id);
 
-        DOCKER
-            .start_container::<String>(&res.id, None)
-            .await
-            .unwrap();
+        DOCKER.start_container::<String>(&res.id, None).await?;
 
         let ws_stream = match listener.accept().await {
             Ok((stream, _)) => accept_async(stream).await?,
@@ -110,14 +108,14 @@ impl Container {
             rpc_records,
             container_rx: Some(container_rx),
             stop_rx,
+            stopped: false,
         })
     }
 
     pub async fn stop(&mut self) -> anyhow::Result<()> {
-        log::info!("Container {}: normal stop", &self.docker_id[..5]);
-
+        log::info!("Container {}: queued normal stop", &self.docker_id[..5]);
         self.commands_tx.send(ContainerCommands::Stop).await?;
-
+        self.stopped = true;
         Ok(())
     }
 
@@ -188,11 +186,11 @@ async fn run_container(
                     Ok(msg) => {
                         match msg {
                             Message::Binary(bin) => {
-                                let msg = rmp_serde::from_slice::<ContainerSent>(&bin).unwrap();
+                                let msg = rmp_serde::from_slice::<ContainerSent>(&bin).expect("rmp_serde deserialize error");
 
                                 match msg {
                                     ContainerSent::RpcResponse { id, result } => {
-                                        let response = serde_json::from_str::<Result<Value, String>>(&result).unwrap();
+                                        let response = serde_json::from_str::<Result<Value, String>>(&result).expect("serde_json deserialize error");
                                         let mut rpc_records = rpc_records.lock().await;
                                         if let Err(err) = rpc_records.handle_incoming(id, response) {
                                             log::error!("Error handling rpc response: {err:#?}");
@@ -213,7 +211,7 @@ async fn run_container(
             Some(msg) = commands_rx.recv() => {
                 match msg {
                     ContainerCommands::SendMessage(msg) => {
-                        let bin = rmp_serde::to_vec_named(&msg).unwrap();
+                        let bin = rmp_serde::to_vec_named(&msg).expect("rmp serde serialize error");
                         tx.send(Message::Binary(bin)).await?;
                     }
                     ContainerCommands::Stop => {
@@ -227,15 +225,24 @@ async fn run_container(
     log::info!("Container {}: closing", &container_id[..5]);
     let mut ws_stream = tx.reunite(rx)?;
 
-    if let Err(e) = ws_stream.close(None).await {
-        log::error!("Error closing container WebSocket Connection: {}", e);
-    }
+    let _ = ws_stream.close(None).await;
 
     fs::remove_dir_all(&socket_dir)
         .await
         .expect("Error removing socket dir");
 
-    stop.send(()).unwrap();
+    DOCKER
+        .remove_container(
+            &container_id,
+            Some(bollard::container::RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect("error deleting container");
+
+    stop.send(()).expect("Error broadcasting stop");
 
     log::info!("Container {}: stopped", &container_id[..5]);
 

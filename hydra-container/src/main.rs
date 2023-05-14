@@ -14,15 +14,6 @@ use crate::commands::Commands;
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    //     let mut command = CommandBuilder::new("python3");
-    //     command.args(&["main.py"]);
-    //     let mut pty = pty::create(command).await?;
-    //     let mut out = pty.output.take().unwrap();
-
-    //     while let Some(line) = out.recv().await {
-    //         log::info!("stdout: {}", line);
-    //     }
-
     let addr = "/run/hydra/conn.sock";
     log::info!("Connecting to {}..", addr);
     let stream = UnixStream::connect(addr).await?;

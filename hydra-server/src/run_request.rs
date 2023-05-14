@@ -61,15 +61,14 @@ impl RunRequest {
         let container = self.container.clone();
 
         self.self_destruct_timer = Some(tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
             app_state.write().run_requests.remove(&ticket);
-            container
-                .write()
-                .await
-                .stop()
-                .await
-                .expect("Unable to stop container");
+            let _ = container.write().await.stop().await;
+            log::info!(
+                "Container {}: cleaned",
+                &container.read().await.docker_id[..5]
+            );
         }));
     }
 
@@ -79,86 +78,99 @@ impl RunRequest {
         }
     }
 
-    async fn handle_message(&mut self, message: String, _messages_tx: &mut mpsc::Sender<Message>) {
+    async fn handle_message(
+        &mut self,
+        message: String,
+        _messages_tx: &mut mpsc::Sender<Message>,
+    ) -> anyhow::Result<()> {
         let data = match serde_json::from_str::<ClientMessage>(&message) {
             Ok(data) => data,
             Err(e) => {
                 log::error!("Error parsing message: {}", e);
-                return;
+                return Ok(());
             }
         };
 
+        let mut container = self.container.write().await;
+
         match data {
             ClientMessage::PtyInput { id, input } => {
-                self.container
-                    .write()
-                    .await
+                if let Err(err) = container
                     .rpc(ContainerRpcRequest::PtyInput { id, input })
-                    .await
-                    .unwrap()
-                    .unwrap();
+                    .await?
+                {
+                    log::error!("PtyInput error: {}", err)
+                }
             }
             ClientMessage::Run => {
-                self.container
-                    .write()
-                    .await
+                if let Err(err) = container
                     .rpc(ContainerRpcRequest::PtyCreate {
                         command: "python3".to_string(),
                         arguments: vec!["main.py".to_string()],
                     })
-                    .await
-                    .unwrap()
-                    .unwrap();
+                    .await?
+                {
+                    log::error!("Run error: {}", err);
+                }
             }
             ClientMessage::Crash => {
-                self.container
-                    .write()
-                    .await
-                    .rpc(ContainerRpcRequest::Crash)
-                    .await
-                    .unwrap()
-                    .unwrap();
+                if let Err(err) = container.rpc(ContainerRpcRequest::Crash).await? {
+                    log::error!("Crash error: {}", err);
+                }
             }
             _ => (),
         }
+
+        Ok(())
     }
 
     async fn send_client_message(
         &mut self,
         message: ServerMessage,
         messages_tx: &mut mpsc::Sender<Message>,
-    ) {
+    ) -> anyhow::Result<()> {
         messages_tx
-            .send(Message::Text(serde_json::to_string(&message).unwrap()))
-            .await
-            .unwrap();
+            .send(Message::Text(
+                serde_json::to_string(&message).expect("serde_json error"),
+            ))
+            .await?;
+        Ok(())
     }
 
     async fn handle_container_message(
         &mut self,
         message: ContainerSent,
         messages_tx: &mut mpsc::Sender<Message>,
-    ) {
+    ) -> anyhow::Result<()> {
         match message {
             ContainerSent::PtyOutput { output, .. } => {
                 self.send_client_message(ServerMessage::PtyOutput { output }, messages_tx)
-                    .await;
+                    .await?;
             }
             ContainerSent::PtyExit { id } => {
                 self.send_client_message(ServerMessage::PtyExit { id }, messages_tx)
-                    .await;
+                    .await?;
             }
             _ => (),
         }
+
+        Ok(())
     }
 
-    pub async fn handle_websocket_connection(mut self, ws: WebSocket) {
+    pub async fn handle_websocket_connection(mut self, ws: WebSocket) -> anyhow::Result<()> {
+        let mut stop_rx = self.container.read().await.stop_rx.clone();
         self.cancel_self_destruct();
 
         let (mut messages_tx, mut messages_rx) = mpsc::channel::<Message>(100);
         let (mut ws_tx, mut ws_rx) = ws.split();
 
-        let mut container_rx = self.container.write().await.container_rx.take().unwrap();
+        let mut container_rx = self
+            .container
+            .write()
+            .await
+            .container_rx
+            .take()
+            .expect("container already taken");
 
         loop {
             tokio::select! {
@@ -173,18 +185,27 @@ impl RunRequest {
                         None => break,
                     };
 
-                    self.handle_message(message, &mut messages_tx).await;
+                    if let Err(err) = self.handle_message(message, &mut messages_tx).await {
+                        log::error!("Error handling message: {}", err);
+                    }
                 }
                 Some(message_to_send) = messages_rx.recv() => {
-                    ws_tx.send(message_to_send).await.unwrap();
+                    ws_tx.send(message_to_send).await?;
                 }
                 Some(container_message) = container_rx.recv() => {
-                    self.handle_container_message(container_message, &mut messages_tx).await;
+                    if let Err(err) = self.handle_container_message(container_message, &mut messages_tx).await {
+                        log::error!("Error handling container message: {}", err);
+                    }
+                }
+                _ = stop_rx.changed() => {
+                    break
                 }
             }
         }
 
         log::info!("Connection closed");
         self.prime_self_destruct();
+
+        Ok(())
     }
 }

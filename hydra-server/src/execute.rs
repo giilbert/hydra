@@ -51,6 +51,10 @@ pub async fn execute_websocket(
         .run_requests
         .remove(&request.ticket)
         .map_or(Err("No such ticket"), |run_request| {
-            Ok(ws.on_upgrade(move |ws| run_request.handle_websocket_connection(ws)))
+            Ok(ws.on_upgrade(move |ws| async {
+                if let Err(err) = run_request.handle_websocket_connection(ws).await {
+                    log::error!("Error handling WebSocket connection: {:?}", err);
+                }
+            }))
         })
 }
