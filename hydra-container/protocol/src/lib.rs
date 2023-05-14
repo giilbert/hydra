@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -8,6 +7,7 @@ pub enum ContainerSent {
     Ping { timestamp: u64 },
     RpcResponse { id: Uuid, result: String },
     PtyOutput { id: u32, output: String },
+    PtyExit { id: u32 },
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]

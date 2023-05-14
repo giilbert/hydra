@@ -29,7 +29,9 @@ pub async fn handle_rpc_procedure(
         }
         ContainerRpcRequest::PtyInput { id, input } => {
             let mut state = state.lock();
-            let pty = state.get_pty(id).unwrap();
+            let pty = state
+                .get_pty(id)
+                .ok_or_else(|| anyhow::anyhow!("cannot find pty"))?;
 
             pty.send(pty::PtyCommands::Input(pty::PtyInput::Text(
                 input.to_string(),

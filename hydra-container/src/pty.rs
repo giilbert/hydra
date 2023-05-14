@@ -1,16 +1,16 @@
-use futures_util::{Sink, SinkExt, Stream, StreamExt};
+use futures_util::{Stream, StreamExt};
 use protocol::ContainerSent;
-use serde::Serialize;
 use std::{
-    error::Error,
-    ffi::OsStr,
     io::{Read, Write},
     ops::{Deref, DerefMut},
     pin::Pin,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -147,6 +147,11 @@ impl Pty {
         self.commands_tx.send(PtyCommands::Kill).await?;
 
         commands.send(Command::RemovePty(self.id.into())).await?;
+        commands
+            .send(Command::Send(Message::Binary(rmp_serde::to_vec_named(
+                &ContainerSent::PtyExit { id: self.id },
+            )?)))
+            .await?;
 
         Ok(())
     }

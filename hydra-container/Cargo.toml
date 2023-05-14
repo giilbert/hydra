@@ -18,3 +18,9 @@ pty-process = { version = "0.2.0", features = ["tokio", "backend-tokio"] }
 async-stream = "0.3.3"
 parking_lot = "0.12.1"
 portable-pty = "0.7.0"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

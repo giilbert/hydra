@@ -24,6 +24,7 @@ pub enum ClientMessage {
 #[serde(tag = "type", content = "data")]
 pub enum ServerMessage {
     PtyOutput { output: String },
+    PtyExit { id: u32 },
 }
 
 #[derive(Debug)]
@@ -131,6 +132,10 @@ impl RunRequest {
         match message {
             ContainerSent::PtyOutput { output, .. } => {
                 self.send_client_message(ServerMessage::PtyOutput { output }, messages_tx)
+                    .await;
+            }
+            ContainerSent::PtyExit { id } => {
+                self.send_client_message(ServerMessage::PtyExit { id }, messages_tx)
                     .await;
             }
             _ => (),

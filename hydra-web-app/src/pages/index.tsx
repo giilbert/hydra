@@ -24,6 +24,7 @@ async function sendRequest() {
 const IndexPage: NextPage = () => {
   const terminalContainerRef = createRef<HTMLDivElement>();
   const [isLoading, setIsLoading] = useState(false);
+  const [running, setRunning] = useState(false);
   const isLoadingXTerm = useRef(false);
   const terminal = useRef<Terminal>();
   const ws = useRef<WebSocket>();
@@ -62,7 +63,6 @@ const IndexPage: NextPage = () => {
     terminal.current?.clear();
     if (ws.current?.readyState === WebSocket.OPEN) ws.current.close();
 
-    console.time("execute");
     setIsLoading(true);
 
     const data = await sendRequest();
@@ -78,22 +78,25 @@ const IndexPage: NextPage = () => {
           data: null,
         })
       );
-      console.timeEnd("execute");
+      setIsLoading(false);
+      setRunning(true);
     });
 
     ws.current.addEventListener("message", (event) => {
       const { type, data } = JSON.parse(event.data);
       if (type === "PtyOutput") terminal.current?.write(data.output);
+      if (type === "PtyExit") {
+        ws.current?.close();
+        setRunning(false);
+      }
     });
-
-    setIsLoading(false);
   }, []);
 
   return (
     <div>
       <button onClick={run}>run</button>
       {isLoading && <p>Loading</p>}
-      <br />
+      {running ? <p>Running</p> : <p>Not running</p>}
       <div ref={terminalContainerRef}></div>
     </div>
   );
