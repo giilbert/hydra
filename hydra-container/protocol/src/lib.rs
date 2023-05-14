@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Commands that are sent from the container TO THE SERVER
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum ContainerSent {
@@ -10,6 +11,7 @@ pub enum ContainerSent {
     PtyExit { id: u32 },
 }
 
+/// Commands that are sent from the server TO THE CONTAINER
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum HostSent {

@@ -28,6 +28,18 @@ pub enum ServerMessage {
     PtyExit { id: u32 },
 }
 
+/// # Where all the magic happens
+///
+/// ## This struct:
+/// - Handles communication between the client and the container
+///   - Server -> client: `ServerMessage` enum
+///   - Client -> server: `ClientMessage` enum
+/// - Makes sure everything is cleaned up when the client leaves
+/// - Make sure everything the client does with the container is allowed
+///
+/// ## It DOES NOT:
+/// - Make sure everything is cleaned up when the container crashes
+/// - Handle messages DIRECTLY from the container
 #[derive(Debug)]
 pub struct RunRequest {
     pub ticket: Uuid,
@@ -55,6 +67,7 @@ impl RunRequest {
         })
     }
 
+    /// After a set duration of inactivity, clean the container up
     pub fn prime_self_destruct(&mut self) {
         let app_state = self.app_state.clone();
         let ticket = self.ticket.clone();

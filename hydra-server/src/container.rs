@@ -20,16 +20,23 @@ lazy_static! {
         Docker::connect_with_local_defaults().expect("unable to connect to docker");
 }
 
+/// The heart of this thing
+///
+/// This struct:
+/// - Interfaces with Docker, to create and destroy the container
+/// - Relays container commands between the container and the respective RunRequest
 #[derive(Debug)]
 pub struct Container {
-    _id: Uuid,
     pub docker_id: String,
-    commands_tx: mpsc::Sender<ContainerCommands>,
     pub container_rx: Option<mpsc::Receiver<ContainerSent>>,
-    socket_dir: PathBuf,
-    rpc_records: Arc<Mutex<RpcRecords>>,
+    /// An event that is fired when the container is stopped
     pub stop_rx: watch::Receiver<()>,
     pub stopped: bool,
+
+    _id: Uuid,
+    commands_tx: mpsc::Sender<ContainerCommands>,
+    /// Keeps track of RPC calls and is used for responses
+    rpc_records: Arc<Mutex<RpcRecords>>,
 }
 
 #[derive(Clone, Debug)]
@@ -104,7 +111,6 @@ impl Container {
             _id: id,
             docker_id: res.id,
             commands_tx,
-            socket_dir,
             rpc_records,
             container_rx: Some(container_rx),
             stop_rx,
@@ -183,29 +189,25 @@ async fn run_container(
         tokio::select! {
             Some(msg) = rx.next() => {
                 match msg {
-                    Ok(msg) => {
-                        match msg {
-                            Message::Binary(bin) => {
-                                let msg = rmp_serde::from_slice::<ContainerSent>(&bin).expect("rmp_serde deserialize error");
+                    Ok(Message::Binary(bin)) => {
+                        let msg = rmp_serde::from_slice::<ContainerSent>(&bin).expect("rmp_serde deserialize error");
 
-                                match msg {
-                                    ContainerSent::RpcResponse { id, result } => {
-                                        let response = serde_json::from_str::<Result<Value, String>>(&result).expect("serde_json deserialize error");
-                                        let mut rpc_records = rpc_records.lock().await;
-                                        if let Err(err) = rpc_records.handle_incoming(id, response) {
-                                            log::error!("Error handling rpc response: {err:#?}");
-                                        };
-                                    },
-                                    _ => container_tx.send(msg).await?,
-                                }
+                        match msg {
+                            ContainerSent::RpcResponse { id, result } => {
+                                let response = serde_json::from_str::<Result<Value, String>>(&result).expect("serde_json deserialize error");
+                                let mut rpc_records = rpc_records.lock().await;
+                                if let Err(err) = rpc_records.handle_incoming(id, response) {
+                                    log::error!("Error handling rpc response: {err:#?}");
+                                };
                             },
-                            msg => log::warn!("recv other than binary: {:?}", msg)
+                            _ => container_tx.send(msg).await?,
                         }
-                    },
+                    }
                     Err(e) => {
-                        log::error!("Error during container WebSocket Connection: {}", e);
+                        log::error!("Container WebSocket unexpectedly hung up: {}", e);
                         break;
                     }
+                    _ => ()
                 }
             }
             Some(msg) = commands_rx.recv() => {
@@ -222,16 +224,18 @@ async fn run_container(
         }
     }
 
-    log::info!("Container {}: closing", &container_id[..5]);
-    let mut ws_stream = tx.reunite(rx)?;
+    log::info!("[{}]: broadcasting stop", &container_id[..5]);
+    stop.send(()).expect("Error broadcasting stop");
 
+    log::info!("[{}]: closing websocket", &container_id[..5]);
+    let mut ws_stream = tx.reunite(rx)?;
     let _ = ws_stream.close(None).await;
 
     fs::remove_dir_all(&socket_dir)
         .await
         .expect("Error removing socket dir");
 
-    DOCKER
+    if let Err(err) = DOCKER
         .remove_container(
             &container_id,
             Some(bollard::container::RemoveContainerOptions {
@@ -240,11 +244,14 @@ async fn run_container(
             }),
         )
         .await
-        .expect("error deleting container");
+    {
+        log::warn!(
+            "[{}]: THIS MAY OR MAY NOT BE AN ERROR: error removing container: {err}",
+            &container_id[..5]
+        );
+    }
 
-    stop.send(()).expect("Error broadcasting stop");
-
-    log::info!("Container {}: stopped", &container_id[..5]);
+    log::info!("[{}]: final stop", &container_id[..5]);
 
     Ok(())
 }
