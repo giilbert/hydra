@@ -30,6 +30,7 @@ pub enum ContainerRpcRequest {
         id: u32,
         input: String,
     },
+    Crash,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]

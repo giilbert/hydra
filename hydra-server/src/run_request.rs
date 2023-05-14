@@ -18,6 +18,7 @@ pub enum ClientMessage {
     PtyInput { id: u32, input: String },
     CreatePty { rows: u16, cols: u16 },
     Run,
+    Crash,
 }
 
 #[derive(Debug, Serialize)]
@@ -105,6 +106,15 @@ impl RunRequest {
                         command: "python3".to_string(),
                         arguments: vec!["main.py".to_string()],
                     })
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
+            ClientMessage::Crash => {
+                self.container
+                    .write()
+                    .await
+                    .rpc(ContainerRpcRequest::Crash)
                     .await
                     .unwrap()
                     .unwrap();

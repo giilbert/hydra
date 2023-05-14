@@ -24,11 +24,13 @@ pub struct AppStateInner {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    console_subscriber::init();
     env_logger::init();
 
+    let state = AppState::default();
     let router = Router::new()
         .route("/execute", post(execute).get(execute_websocket))
-        .with_state(AppState::default())
+        .with_state(state.clone())
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
@@ -36,6 +38,12 @@ async fn main() -> anyhow::Result<()> {
                 .allow_methods(Any),
         );
 
+    // tokio::spawn(async move {
+    //     loop {
+    //         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    //         log::info!("Run requests: {:?}", state.read().run_requests.keys());
+    //     }
+    // });
     log::info!("Server listening on 0.0.0.0:3001");
     axum::Server::bind(&"0.0.0.0:3001".parse()?)
         .serve(router.into_make_service())

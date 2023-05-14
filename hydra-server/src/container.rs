@@ -8,7 +8,7 @@ use serde_json::Value;
 use tokio::{
     fs,
     net::{UnixListener, UnixStream},
-    sync::{mpsc, Mutex},
+    sync::{mpsc, oneshot, Mutex},
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
@@ -78,7 +78,8 @@ impl Container {
         let ws_stream = match listener.accept().await {
             Ok((stream, _)) => accept_async(stream).await?,
             Err(e) => {
-                log::error!("Error during WebSocket Connection: {}", e);
+                log::error!("Error during initial WebSocket Connection: {}", e);
+                fs::remove_dir_all(&socket_dir).await?;
                 return Err(e.into());
             }
         };
@@ -94,6 +95,7 @@ impl Container {
             commands_rx,
             rpc_records.clone(),
             container_tx,
+            socket_dir.clone(),
         ));
 
         Ok(Self {
@@ -107,10 +109,9 @@ impl Container {
     }
 
     pub async fn stop(&mut self) -> anyhow::Result<()> {
-        log::info!("Stopping container {}", &self.docker_id[..5]);
+        log::info!("Container {}: normal stop", &self.docker_id[..5]);
 
         self.commands_tx.send(ContainerCommands::Stop).await?;
-        fs::remove_dir_all(&self.socket_dir).await?;
 
         Ok(())
     }
@@ -138,12 +139,15 @@ async fn run_container(
     mut commands_rx: mpsc::Receiver<ContainerCommands>,
     rpc_records: Arc<Mutex<RpcRecords>>,
     container_tx: mpsc::Sender<ContainerSent>,
+    socket_dir: PathBuf,
 ) -> anyhow::Result<()> {
     let (mut tx, mut rx) = ws_stream.split();
+    let (stop, mut stop_rx) = oneshot::channel();
 
+    let container_id_clone = container_id.clone();
     tokio::spawn(async move {
         let mut log_stream = DOCKER.logs(
-            &container_id,
+            &container_id_clone,
             Some(container::LogsOptions::<String> {
                 follow: true,
                 stdout: true,
@@ -152,8 +156,19 @@ async fn run_container(
             }),
         );
 
-        while let Some(Ok(msg)) = log_stream.next().await {
-            log::info!("[{}]: {}", &container_id[..5], &msg.to_string().trim_end());
+        loop {
+            tokio::select! {
+                Some(Ok(msg)) = log_stream.next() => {
+                    log::info!(
+                        "[{}]: {}",
+                        &container_id_clone[..5],
+                        &msg.to_string().trim_end()
+                    );
+                }
+                _ = &mut stop_rx => {
+                    break;
+                }
+            }
         }
     });
 
@@ -181,7 +196,7 @@ async fn run_container(
                         }
                     },
                     Err(e) => {
-                        log::error!("Error during WebSocket Connection: {}", e);
+                        log::error!("Error during container WebSocket Connection: {}", e);
                         break;
                     }
                 }
@@ -200,8 +215,20 @@ async fn run_container(
         }
     }
 
+    log::info!("Container {}: closing", &container_id[..5]);
     let mut ws_stream = tx.reunite(rx)?;
-    ws_stream.close(None).await?;
+
+    if let Err(e) = ws_stream.close(None).await {
+        log::error!("Error closing container WebSocket Connection: {}", e);
+    }
+
+    fs::remove_dir_all(&socket_dir)
+        .await
+        .expect("Error removing socket dir");
+
+    stop.send(()).unwrap();
+
+    log::info!("Container {}: stopped", &container_id[..5]);
 
     Ok(())
 }

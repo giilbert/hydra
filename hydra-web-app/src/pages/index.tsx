@@ -92,9 +92,19 @@ const IndexPage: NextPage = () => {
     });
   }, []);
 
+  const crash = useCallback(() => {
+    ws.current!.send(
+      JSON.stringify({
+        type: "Crash",
+        data: null,
+      })
+    );
+  }, []);
+
   return (
     <div>
       <button onClick={run}>run</button>
+      <button onClick={crash}>crash</button>
       {isLoading && <p>Loading</p>}
       {running ? <p>Running</p> : <p>Not running</p>}
       <div ref={terminalContainerRef}></div>

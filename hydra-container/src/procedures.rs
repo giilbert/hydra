@@ -28,6 +28,7 @@ pub async fn handle_rpc_procedure(
             return Ok(Ok(json!({ "id": id })));
         }
         ContainerRpcRequest::PtyInput { id, input } => {
+            // panic!();
             let mut state = state.lock();
             let pty = state
                 .get_pty(id)
@@ -51,6 +52,9 @@ pub async fn handle_rpc_procedure(
             }
 
             Ok(Ok(().into()))
+        }
+        ContainerRpcRequest::Crash => {
+            panic!("ContainerRpcRequest::Crash");
         }
     }
 }

@@ -22,3 +22,4 @@ uuid = { version = "1.3.0", features = ["v4"] }
 rmp-serde = "1.1.1"
 parking_lot = "0.12.1"
 tower-http = { version = "0.3.5", features = ["cors"] }
+console-subscriber = "0.1.9"
