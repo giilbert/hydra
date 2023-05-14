@@ -17,22 +17,25 @@ pub enum HostSent {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
-pub enum ContainerRpcProcedure {
-    SetupFromOptions,
-    PtyCreate,
-    PtyInput,
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct ContainerRpcRequest {
-    pub procedure: ContainerRpcProcedure,
-    pub parameters: Value,
+#[serde(tag = "type", content = "data")]
+pub enum ContainerRpcRequest {
+    SetupFromOptions {
+        files: Vec<File>,
+    },
+    PtyCreate {
+        command: String,
+        arguments: Vec<String>,
+    },
+    PtyInput {
+        id: u32,
+        input: String,
+    },
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ContainerRpcResponse {}
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct File {
     pub path: String,
     pub content: String,

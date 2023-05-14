@@ -18,7 +18,7 @@ use crate::{
 #[derive(Debug)]
 pub enum Command {
     Send(Message),
-    RemovePty(u64),
+    RemovePty(u32),
 }
 
 pub struct Commands {

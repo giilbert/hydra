@@ -2,12 +2,12 @@ use axum::debug_handler;
 use axum::extract::{Query, WebSocketUpgrade};
 use axum::response::Response;
 use axum::{extract::State, Json};
-use protocol::{ContainerRpcProcedure, ContainerRpcRequest, ExecuteOptions};
+use protocol::ExecuteOptions;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::run_request::RunRequest;
-use crate::{container::Container, AppState};
+use crate::AppState;
 
 #[derive(Serialize)]
 pub struct ExecuteResponse {

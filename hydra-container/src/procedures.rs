@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use parking_lot::Mutex;
 use portable_pty::CommandBuilder;
-use protocol::{ContainerRpcProcedure, ContainerRpcRequest, ExecuteOptions};
+use protocol::ContainerRpcRequest;
 use serde_json::{json, Value};
 use tokio::{fs, sync::mpsc};
 
@@ -13,19 +13,13 @@ pub async fn handle_rpc_procedure(
     req: ContainerRpcRequest,
     state: Arc<Mutex<State>>,
 ) -> anyhow::Result<Result<Value, String>> {
-    let ContainerRpcRequest {
-        ref procedure,
-        ref parameters,
-    } = req;
-
-    match procedure {
-        ContainerRpcProcedure::PtyCreate => {
-            let command = parameters["command"].as_str().unwrap();
-            let arguments = parameters["arguments"].as_array().unwrap();
+    match req {
+        ContainerRpcRequest::PtyCreate { command, arguments } => {
             let mut cmd = CommandBuilder::new(command);
             for arg in arguments {
-                cmd.arg(arg.as_str().unwrap());
+                cmd.arg(arg);
             }
+
             let pty = pty::create(cmd).await?;
             let id = state.lock().register_pty(pty.commands_tx.clone());
 
@@ -33,10 +27,7 @@ pub async fn handle_rpc_procedure(
 
             return Ok(Ok(json!({ "id": id })));
         }
-        ContainerRpcProcedure::PtyInput => {
-            let id = parameters["id"].as_u64().unwrap();
-            let input = parameters["input"].as_str().unwrap();
-
+        ContainerRpcRequest::PtyInput { id, input } => {
             let mut state = state.lock();
             let pty = state.get_pty(id).unwrap();
 
@@ -47,12 +38,10 @@ pub async fn handle_rpc_procedure(
 
             return Ok(Ok(json!({})));
         }
-        ContainerRpcProcedure::SetupFromOptions => {
-            log::info!("SetupFromOptions: {:?}", parameters);
-
+        ContainerRpcRequest::SetupFromOptions { files } => {
             let root_path = PathBuf::from("/root/");
-            let options = serde_json::from_value::<ExecuteOptions>(parameters.clone())?;
-            for file in options.files {
+
+            for file in files {
                 let path = file.path.clone();
                 let content = file.content.clone();
 

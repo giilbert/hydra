@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use protocol::{ContainerRpcProcedure, ContainerRpcRequest, ContainerSent, ExecuteOptions};
+use protocol::{ContainerRpcRequest, ContainerSent, ExecuteOptions};
 use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{mpsc, RwLock},
@@ -15,7 +15,7 @@ use crate::{container::Container, AppState};
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum ClientMessage {
-    PtyInput { id: u64, input: String },
+    PtyInput { id: u32, input: String },
     CreatePty { rows: u16, cols: u16 },
     Run,
 }
@@ -39,9 +39,8 @@ impl RunRequest {
         let mut container = Container::new().await?;
 
         container
-            .rpc(ContainerRpcRequest {
-                procedure: ContainerRpcProcedure::SetupFromOptions,
-                parameters: serde_json::to_value(options).unwrap(),
+            .rpc(ContainerRpcRequest::SetupFromOptions {
+                files: options.files,
             })
             .await?
             .map_err(|_| anyhow::anyhow!("Error setting up container"))?;
@@ -92,13 +91,7 @@ impl RunRequest {
                 self.container
                     .write()
                     .await
-                    .rpc(ContainerRpcRequest {
-                        procedure: ContainerRpcProcedure::PtyInput,
-                        parameters: serde_json::json!({
-                            "id": id,
-                            "input": input,
-                        }),
-                    })
+                    .rpc(ContainerRpcRequest::PtyInput { id, input })
                     .await
                     .unwrap()
                     .unwrap();
@@ -107,12 +100,9 @@ impl RunRequest {
                 self.container
                     .write()
                     .await
-                    .rpc(ContainerRpcRequest {
-                        procedure: ContainerRpcProcedure::PtyCreate,
-                        parameters: serde_json::json!({
-                            "command": "python3",
-                            "arguments": ["main.py"],
-                        }),
+                    .rpc(ContainerRpcRequest::PtyCreate {
+                        command: "python3".to_string(),
+                        arguments: vec!["main.py".to_string()],
                     })
                     .await
                     .unwrap()
@@ -160,7 +150,7 @@ impl RunRequest {
                 message = ws_rx.next() => {
                     let message = match message {
                         Some(Ok(Message::Text(message))) => message,
-                        Some(Ok(_)) => continue,
+                       Some(Ok(_)) => continue,
                         Some(Err(e)) => {
                             log::error!("Error receiving message: {}", e);
                             break;
