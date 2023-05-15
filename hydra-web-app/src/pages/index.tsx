@@ -9,7 +9,14 @@ async function sendRequest() {
       files: [
         {
           path: "main.py",
-          content: 'print("Hello " + input("What is your name? ") + "!")',
+          content: `
+a = []
+
+for i in range(10):
+  a.append(float(input("Enter a number: ")))
+
+print("Sum:", sum(a))
+`,
         },
       ],
     }),

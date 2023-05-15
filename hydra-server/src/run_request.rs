@@ -79,7 +79,7 @@ impl RunRequest {
             app_state.write().run_requests.remove(&ticket);
             let _ = container.write().await.stop().await;
             log::info!(
-                "Container {}: cleaned",
+                "[{}]: cleaned - prime_self_destruct",
                 &container.read().await.docker_id[..5]
             );
         }));

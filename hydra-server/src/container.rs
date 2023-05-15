@@ -70,7 +70,7 @@ impl Container {
                         auto_remove: Some(true),
                         cpu_quota: Some(20000),
                         cpuset_cpus: Some("0-1".into()),
-                        memory: Some(64 * 1000 * 1000),
+                        memory: Some(16 * 1000 * 1000),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -119,7 +119,7 @@ impl Container {
     }
 
     pub async fn stop(&mut self) -> anyhow::Result<()> {
-        log::info!("Container {}: queued normal stop", &self.docker_id[..5]);
+        log::info!("[{}]: queued normal stop", &self.docker_id[..5]);
         self.commands_tx.send(ContainerCommands::Stop).await?;
         self.stopped = true;
         Ok(())

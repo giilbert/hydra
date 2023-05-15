@@ -24,8 +24,8 @@ pub struct AppStateInner {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    console_subscriber::init();
-    env_logger::init();
+    // console_subscriber::init();
+    pretty_env_logger::init();
 
     let state = AppState::default();
     let router = Router::new()

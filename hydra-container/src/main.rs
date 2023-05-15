@@ -12,7 +12,7 @@ use crate::commands::Commands;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::init();
+    pretty_env_logger::init();
 
     let addr = "/run/hydra/conn.sock";
     log::info!("Connecting to {}..", addr);
