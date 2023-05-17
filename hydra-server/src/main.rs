@@ -27,12 +27,12 @@ pub struct AppStateInner {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    console_subscriber::init();
+    // console_subscriber::init();
     pretty_env_logger::init();
 
     let state = AppState::new(RwLock::new(AppStateInner {
         run_requests: Default::default(),
-        container_pool: ContainerPool::new(1).await,
+        container_pool: ContainerPool::new(3).await,
     }));
 
     let router = Router::new()
