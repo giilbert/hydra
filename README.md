@@ -12,7 +12,7 @@ Sandboxed code execution. *with a terminal*
 ### Steps:
 #### Building `hydra-container`:
 1. `cd` into `hydra-container`
-2. Run `docker build -t hydra-container`.
+2. Run `docker build -t hydra-container .`
 
 This will create an image called `hydra-container`, containing the supervisor for running client code in the container sandbox.
 The name must be `hydra-container`, since the name is hardcoded.
