@@ -3,8 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 use axum::{routing::post, Router};
 use container::Container;
 use execute::execute;
-use parking_lot::RwLock;
+use pool::ContainerPool;
 use run_request::RunRequest;
+use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
 
@@ -12,22 +13,28 @@ use crate::execute::execute_websocket;
 
 mod container;
 mod execute;
+mod pool;
 mod rpc;
 mod run_request;
 
 type AppState = Arc<RwLock<AppStateInner>>;
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct AppStateInner {
     pub run_requests: HashMap<Uuid, RunRequest>,
+    pub container_pool: ContainerPool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // console_subscriber::init();
+    console_subscriber::init();
     pretty_env_logger::init();
 
-    let state = AppState::default();
+    let state = AppState::new(RwLock::new(AppStateInner {
+        run_requests: Default::default(),
+        container_pool: ContainerPool::new(1).await,
+    }));
+
     let router = Router::new()
         .route("/execute", post(execute).get(execute_websocket))
         .with_state(state.clone())

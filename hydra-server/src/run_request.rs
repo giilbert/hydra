@@ -50,7 +50,14 @@ pub struct RunRequest {
 
 impl RunRequest {
     pub async fn new(options: ExecuteOptions, app_state: AppState) -> anyhow::Result<Self> {
-        let mut container = Container::new().await?;
+        let mut container = {
+            let mut app_state = app_state.write().await;
+            let mut recv = app_state.container_pool.take_one().await;
+            recv
+        }
+        .recv()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("No containers available"))?;
 
         container
             .rpc(ContainerRpcRequest::SetupFromOptions {
@@ -74,9 +81,9 @@ impl RunRequest {
         let container = self.container.clone();
 
         self.self_destruct_timer = Some(tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-            app_state.write().run_requests.remove(&ticket);
+            app_state.write().await.run_requests.remove(&ticket);
             let _ = container.write().await.stop().await;
             log::info!(
                 "[{}]: cleaned - prime_self_destruct",
@@ -190,7 +197,7 @@ impl RunRequest {
                 message = ws_rx.next() => {
                     let message = match message {
                         Some(Ok(Message::Text(message))) => message,
-                       Some(Ok(_)) => continue,
+                        Some(Ok(_)) => continue,
                         Some(Err(e)) => {
                             log::error!("Error receiving message: {}", e);
                             break;

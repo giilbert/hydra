@@ -34,6 +34,7 @@ pub struct Container {
     pub stopped: bool,
 
     _id: Uuid,
+    deletion_tx: Option<mpsc::Sender<String>>,
     commands_tx: mpsc::Sender<ContainerCommands>,
     /// Keeps track of RPC calls and is used for responses
     rpc_records: Arc<Mutex<RpcRecords>>,
@@ -46,7 +47,7 @@ pub enum ContainerCommands {
 }
 
 impl Container {
-    pub async fn new() -> anyhow::Result<Self> {
+    pub async fn new(deletion_tx: Option<mpsc::Sender<String>>) -> anyhow::Result<Self> {
         let id = Uuid::new_v4();
         let cwd = std::env::current_dir()?;
         let socket_dir = cwd.join(format!("sockets/{}", id));
@@ -105,11 +106,13 @@ impl Container {
             socket_dir.clone(),
             stop,
             stop_rx.clone(),
+            deletion_tx.clone(),
         ));
 
         Ok(Self {
             _id: id,
             docker_id: res.id,
+            deletion_tx,
             commands_tx,
             rpc_records,
             container_rx: Some(container_rx),
@@ -121,6 +124,9 @@ impl Container {
     pub async fn stop(&mut self) -> anyhow::Result<()> {
         log::info!("[{}]: queued normal stop", &self.docker_id[..5]);
         self.commands_tx.send(ContainerCommands::Stop).await?;
+        if let Some(deletion_tx) = &self.deletion_tx {
+            deletion_tx.send(self.docker_id.clone()).await?;
+        }
         self.stopped = true;
         Ok(())
     }
@@ -154,6 +160,7 @@ async fn run_container(
     socket_dir: PathBuf,
     stop: watch::Sender<()>,
     mut stop_rx: watch::Receiver<()>,
+    deletion_tx: Option<mpsc::Sender<String>>,
 ) -> anyhow::Result<()> {
     let (mut tx, mut rx) = ws_stream.split();
 
@@ -252,6 +259,10 @@ async fn run_container(
     }
 
     log::info!("[{}]: final stop", &container_id[..5]);
+
+    if let Some(deletion_tx) = deletion_tx {
+        deletion_tx.send(container_id).await?;
+    }
 
     Ok(())
 }

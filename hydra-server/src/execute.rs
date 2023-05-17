@@ -21,14 +21,23 @@ pub async fn execute(
 ) -> Result<Json<ExecuteResponse>, &'static str> {
     let mut run_request = RunRequest::new(options, app_state.clone())
         .await
-        .map_err(|_| "Failed to create run request.")?;
+        .map_err(|e| {
+            log::error!("{e}");
+            "Failed to create run request."
+        })?;
+
+    log::info!("Created request");
+
     let ticket = run_request.ticket.clone();
     run_request.prime_self_destruct();
 
     app_state
         .write()
+        .await
         .run_requests
         .insert(run_request.ticket, run_request);
+
+    log::info!("Inserted request");
 
     Ok(Json(ExecuteResponse {
         ticket: ticket.to_string(),
@@ -48,6 +57,7 @@ pub async fn execute_websocket(
 ) -> Result<Response, &'static str> {
     app_state
         .write()
+        .await
         .run_requests
         .remove(&request.ticket)
         .map_or(Err("No such ticket"), |run_request| {
