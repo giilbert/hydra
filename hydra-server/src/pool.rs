@@ -15,7 +15,7 @@ static CONTAINER_QUEUE_NOTIFY: Notify = Notify::const_new();
 pub struct ContainerPool {
     pub deletion_tx: tokio::sync::mpsc::Sender<String>,
     // mapping docker id to Container
-    containers: Arc<RwLock<HashMap<String, Container>>>,
+    _containers: Arc<RwLock<HashMap<String, Container>>>,
     queue: Queue,
 }
 
@@ -26,21 +26,36 @@ impl ContainerPool {
 
         let containers_clone = containers.clone();
         let deletion_tx_clone = deletion_tx.clone();
+
+        // spawn a task that listens for container deletion events,
+        // and spawns a new container if the pool is not full
         tokio::spawn(async move {
             while let Some(_) = deletion_rx.recv().await {
                 let containers_clone = containers_clone.clone();
                 let deletion_tx_clone = deletion_tx_clone.clone();
-                tokio::spawn(async move {
-                    let new_container = Container::new(Some(deletion_tx_clone.clone()))
-                        .await
-                        .expect("error creating container.");
-                    containers_clone
-                        .write()
-                        .await
-                        .insert(new_container.docker_id.clone(), new_container);
 
-                    CONTAINER_QUEUE_NOTIFY.notify_waiters();
-                });
+                // if the amount of containers in the pool is less
+                // than the declared pool_size, spawn a new container
+                //
+                // TODO:
+                // If multiple containers are deleted at almost the same time,
+                // this will spawn multiple containers. This is not a big deal, as
+                // the pool will eventually reach the desired size and we have a
+                // sizeable amount of memory to spare, but it would be nice to
+                // avoid this.
+                if containers_clone.read().await.len() < pool_size as usize {
+                    tokio::spawn(async move {
+                        let new_container = Container::new(Some(deletion_tx_clone.clone()))
+                            .await
+                            .expect("error creating container.");
+                        containers_clone
+                            .write()
+                            .await
+                            .insert(new_container.docker_id.clone(), new_container);
+
+                        CONTAINER_QUEUE_NOTIFY.notify_waiters();
+                    });
+                }
             }
         });
 
@@ -65,11 +80,7 @@ impl ContainerPool {
         let containers_clone = containers.clone();
         tokio::spawn(async move {
             loop {
-                log::info!("Waiting for notification...");
-
                 CONTAINER_QUEUE_NOTIFY.notified().await;
-
-                log::info!("Notified");
 
                 let next_id = match containers_clone.read().await.keys().next().cloned() {
                     Some(id) => id,
@@ -78,7 +89,7 @@ impl ContainerPool {
 
                 let popped = {
                     let mut queue_clone = queue_clone.write().await;
-                    queue_clone.pop_front()
+                    queue_clone.pop_back()
                 };
 
                 if let Some(sender) = popped {
@@ -94,7 +105,7 @@ impl ContainerPool {
         });
 
         Self {
-            containers,
+            _containers: containers,
             deletion_tx,
             queue,
         }
