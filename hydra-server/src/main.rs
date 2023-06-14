@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use axum::{routing::post, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use container::Container;
 use execute::execute;
 use pool::ContainerPool;
@@ -32,10 +35,11 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState::new(RwLock::new(AppStateInner {
         run_requests: Default::default(),
-        container_pool: ContainerPool::new(3).await,
+        container_pool: ContainerPool::new(5).await,
     }));
 
     let router = Router::new()
+        .route("/", get(|| async { "Hydra" }))
         .route("/execute", post(execute).get(execute_websocket))
         .with_state(state.clone())
         .layer(
