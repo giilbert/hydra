@@ -5,7 +5,11 @@ export const getHydraUrl = () => {
     return "http://localhost:8080/hydra";
   }
 
-  return "https://d3be-173-3-124-82.ngrok-free.app/hydra";
+  if (process.env.NODE_ENV === "production") {
+    return process.env.HYDRA_URL;
+  }
+
+  throw new Error("Cannot determine HYDRA_URL");
 };
 
 export interface File {
