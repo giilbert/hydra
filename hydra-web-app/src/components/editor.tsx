@@ -116,54 +116,76 @@ print("Goodbye!")`,
 
       <HStack my="2">
         {files.map((file) => (
-          <Box
+          <HStack
             key={file.path}
             bg="whiteAlpha.200"
-            px="4"
+            px="3"
             py="1"
             borderRadius="md"
             cursor="pointer"
             onClick={() => setSelectedFile(file.path)}
           >
             <Box>{file.path}</Box>
-          </Box>
+            <Text
+              color={fadedTextColor}
+              _hover={{ textDecoration: "underline" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                removeFile(file.path);
+              }}
+            >
+              Delete
+            </Text>
+          </HStack>
         ))}
       </HStack>
 
-      <Input
-        placeholder="File name"
-        value={input}
-        onChange={(e) => {
-          setInput(e.target.value);
-        }}
-      />
       <HStack my="2">
+        <Input
+          size="sm"
+          placeholder="File name"
+          value={input}
+          onChange={(e) => {
+            setInput(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              if (input === "") return;
+              addFile(input);
+              setInput("");
+            }
+          }}
+        />
         <Button
+          size="sm"
           onClick={() => {
             if (input === "") return;
             addFile(input);
             setInput("");
           }}
+          w="24"
         >
           Add file
         </Button>
-        <Button onClick={() => removeFile(files[files.length - 1].path)}>
-          Remove last file
-        </Button>
       </HStack>
 
-      <Divider my="2" />
-
-      <Text mb="2" color={fadedTextColor}>
-        Editing: {selectedFile}
-      </Text>
-      <ReactCodeMirror
-        value={files.find((file) => file.path === selectedFile)?.content || ""}
-        onChange={onChange}
-        extensions={[python()]}
-        theme={colorMode}
-        height="300px"
-      />
+      {files.findIndex((file) => file.path === selectedFile) !== -1 && (
+        <>
+          <Divider my="2" />
+          <Text mb="2" color={fadedTextColor}>
+            Editing: {selectedFile}
+          </Text>
+          <ReactCodeMirror
+            value={
+              files.find((file) => file.path === selectedFile)?.content || ""
+            }
+            onChange={onChange}
+            extensions={[python()]}
+            theme={colorMode}
+            height="300px"
+          />
+        </>
+      )}
     </Box>
   );
 };
