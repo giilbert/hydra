@@ -12,6 +12,10 @@ const IndexPage: NextPage = () => {
     <HydraProvider>
       <Head>
         <title>Hydra</title>
+        <meta
+          name="description"
+          content="Code execution with a terminal doododooooo"
+        />
       </Head>
 
       <Button position="fixed" bottom="4" left="4" onClick={toggleColorMode}>

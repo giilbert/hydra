@@ -9,6 +9,7 @@ edition = "2021"
 anyhow = "1.0.69"
 axum = { version = "0.6.18", features = ["ws", "macros"] }
 bollard = "0.14.0"
+dotenv = "0.15.0"
 futures-util = "0.3.26"
 log = "0.4.17"
 serde = { version = "1.0.152", features = ["serde_derive"] }

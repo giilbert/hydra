@@ -1,3 +1,4 @@
+import { useToast } from "@chakra-ui/react";
 import {
   createContext,
   useCallback,
@@ -6,7 +7,7 @@ import {
   useState,
 } from "react";
 import { Emitter } from "strict-event-emitter";
-import { File, getHydraUrl, Message, sendRequest } from "./protocol";
+import { File, getHydraUrl, Message, createRunRequest } from "./protocol";
 
 type HydraState = "idle" | "loading" | "running" | "error";
 
@@ -43,6 +44,7 @@ export const HydraProvider: React.FC<{
   const [status, setStatus] = useState<HydraState>("idle");
   const ws = useRef<WebSocket>();
   const eventsRef = useRef<Emitter<HydraEvents>>(new Emitter());
+  const toast = useToast();
 
   const run = useCallback(async (files: File[]) => {
     eventsRef.current.emit("terminal:clear");
@@ -50,9 +52,22 @@ export const HydraProvider: React.FC<{
 
     setStatus("loading");
 
-    const data = await sendRequest({
-      files,
-    });
+    let data: { ticket: string } = undefined as any;
+    try {
+      data = await createRunRequest({
+        files,
+      });
+    } catch (e) {
+      console.error(e);
+      toast({
+        title: "Error",
+        description: "Failed to create run request. More info in console.",
+        status: "error",
+        isClosable: true,
+      });
+      setStatus("error");
+      return;
+    }
 
     ws.current = new WebSocket(
       `${getHydraUrl().replace("http", "ws")}/execute?ticket=` + data.ticket

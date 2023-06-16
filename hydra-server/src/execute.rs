@@ -14,19 +14,28 @@ pub struct ExecuteResponse {
     pub ticket: String,
 }
 
+#[derive(Deserialize)]
+pub struct ExecuteQueryParams {
+    api_key: String,
+}
+
+/// Creates a run request
 #[debug_handler]
 pub async fn execute(
     State(app_state): State<AppState>,
+    Query(params): Query<ExecuteQueryParams>,
     Json(options): Json<ExecuteOptions>,
 ) -> Result<Json<ExecuteResponse>, &'static str> {
+    if params.api_key != app_state.read().await.api_key {
+        return Err("Invalid API key");
+    }
+
     let mut run_request = RunRequest::new(options, app_state.clone())
         .await
         .map_err(|e| {
             log::error!("{e}");
             "Failed to create run request."
         })?;
-
-    log::info!("Created request");
 
     let ticket = run_request.ticket.clone();
     run_request.prime_self_destruct();
@@ -36,8 +45,6 @@ pub async fn execute(
         .await
         .run_requests
         .insert(run_request.ticket, run_request);
-
-    log::info!("Inserted request");
 
     Ok(Json(ExecuteResponse {
         ticket: ticket.to_string(),

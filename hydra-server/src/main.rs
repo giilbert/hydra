@@ -26,16 +26,21 @@ type AppState = Arc<RwLock<AppStateInner>>;
 pub struct AppStateInner {
     pub run_requests: HashMap<Uuid, RunRequest>,
     pub container_pool: ContainerPool,
+    pub api_key: String,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // console_subscriber::init();
+    dotenv::dotenv().ok();
     pretty_env_logger::init();
 
     let state = AppState::new(RwLock::new(AppStateInner {
         run_requests: Default::default(),
         container_pool: ContainerPool::new(5).await,
+        api_key: std::env::var("HYDRA_API_KEY").unwrap_or_else(|_| {
+            log::warn!("No API key set. Using `hydra`.");
+            "hydra".to_string()
+        }),
     }));
 
     let router = Router::new()
@@ -49,12 +54,6 @@ async fn main() -> anyhow::Result<()> {
                 .allow_methods(Any),
         );
 
-    // tokio::spawn(async move {
-    //     loop {
-    //         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    //         log::info!("Run requests: {:?}", state.read().run_requests.keys());
-    //     }
-    // });
     log::info!("Server listening on 0.0.0.0:3001");
     axum::Server::bind(&"0.0.0.0:3001".parse()?)
         .serve(router.into_make_service())

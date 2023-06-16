@@ -64,13 +64,15 @@ impl ContainerPool {
             for _ in 0..pool_size {
                 let deletion_tx_clone = deletion_tx.clone();
                 let containers_clone = containers.clone();
-                let new_container = Container::new(Some(deletion_tx_clone.clone()))
-                    .await
-                    .expect("error creating container.");
-                containers_clone
-                    .write()
-                    .await
-                    .insert(new_container.docker_id.clone(), new_container);
+                tokio::spawn(async move {
+                    let new_container = Container::new(Some(deletion_tx_clone.clone()))
+                        .await
+                        .expect("error creating container.");
+                    containers_clone
+                        .write()
+                        .await
+                        .insert(new_container.docker_id.clone(), new_container);
+                });
             }
         }
 
