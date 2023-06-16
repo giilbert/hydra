@@ -5,8 +5,11 @@ export const getHydraUrl = () => {
     return "http://0.0.0.0:3001";
   }
 
-  if (process.env.NODE_ENV === "production" && process.env.HYDRA_URL) {
-    return process.env.HYDRA_URL as string;
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.NEXT_PUBLIC_HYDRA_URL
+  ) {
+    return process.env.NEXT_PUBLIC_HYDRA_URL as string;
   }
 
   throw new Error("Cannot determine HYDRA_URL");
