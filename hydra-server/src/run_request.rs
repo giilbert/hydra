@@ -98,7 +98,7 @@ impl RunRequest {
         }
     }
 
-    async fn handle_message(
+    async fn handle_client_message(
         &mut self,
         message: String,
         _messages_tx: &mut mpsc::Sender<Message>,
@@ -197,6 +197,7 @@ impl RunRequest {
                 message = ws_rx.next() => {
                     let message = match message {
                         Some(Ok(Message::Text(message))) => message,
+                        Some(Ok(Message::Close(_))) => break,
                         Some(Ok(_)) => continue,
                         Some(Err(e)) => {
                             log::error!("Error receiving message: {}", e);
@@ -205,7 +206,7 @@ impl RunRequest {
                         None => break,
                     };
 
-                    if let Err(err) = self.handle_message(message, &mut messages_tx).await {
+                    if let Err(err) = self.handle_client_message(message, &mut messages_tx).await {
                         log::error!("Error handling message: {}", err);
                     }
                 }
@@ -223,7 +224,26 @@ impl RunRequest {
             }
         }
 
-        log::info!("Connection closed");
+        if let Err(e) = ws_rx.reunite(ws_tx)?.close().await {
+            use tokio_tungstenite::tungstenite::Error as WSError;
+
+            let inner = e
+                .into_inner()
+                .downcast::<WSError>()
+                // i think only tungstenite errors are possible, but idk
+                .map_err(|e| {
+                    anyhow::anyhow!("Received anything but a tungstenite error: {:?}", e)
+                })?;
+
+            match *inner {
+                WSError::ConnectionClosed => {
+                    log::info!("Connection closed");
+                }
+                e => {
+                    log::error!("Error closing connection: {}", e);
+                }
+            }
+        }
         self.prime_self_destruct();
 
         Ok(())

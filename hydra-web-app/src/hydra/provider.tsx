@@ -46,65 +46,73 @@ export const HydraProvider: React.FC<{
   const eventsRef = useRef<Emitter<HydraEvents>>(new Emitter());
   const toast = useToast();
 
-  const run = useCallback(async (files: File[]) => {
-    eventsRef.current.emit("terminal:clear");
-    if (ws.current?.readyState === WebSocket.OPEN) ws.current.close();
+  const run = useCallback(
+    async (files: File[]) => {
+      eventsRef.current.emit("terminal:clear");
+      if (ws.current?.readyState === WebSocket.OPEN) ws.current.close();
 
-    setStatus("loading");
+      setStatus("loading");
 
-    let data: { ticket: string } = undefined as any;
-    try {
-      data = await createRunRequest({
-        files,
-      });
-    } catch (e) {
-      console.error(e);
-      toast({
-        title: "Error",
-        description: "Failed to create run request. More info in console.",
-        status: "error",
-        isClosable: true,
-      });
-      setStatus("error");
-      return;
-    }
-
-    ws.current = new WebSocket(
-      `${getHydraUrl().replace("http", "ws")}/execute?ticket=` + data.ticket
-    );
-
-    ws.current.addEventListener("open", () => {
-      if (!ws.current) throw new Error("ws.current is null");
-      ws.current.send(
-        JSON.stringify({
-          type: "Run",
-          data: null,
-        })
-      );
-      setStatus("running");
-    });
-
-    ws.current.addEventListener("message", (event) => {
-      const { type, data }: Message = JSON.parse(event.data);
-      if (type === "PtyOutput") {
-        eventsRef.current.emit("terminal:output", data.output);
-      }
-      if (type === "PtyExit") {
-        ws.current?.close();
-        setStatus("idle");
-      }
-    });
-
-    ws.current.addEventListener("close", (e) => {
-      if (!e.wasClean) {
-        console.error("not a clean close", e);
+      let data: { ticket: string } = undefined as any;
+      try {
+        data = await createRunRequest({
+          files,
+        });
+      } catch (e) {
+        console.error(e);
+        toast({
+          title: "Error",
+          description: "Failed to create run request. More info in console.",
+          status: "error",
+          isClosable: true,
+        });
         setStatus("error");
-      } else {
-        console.log("clean close");
-        setStatus("idle");
+        return;
       }
-    });
-  }, []);
+
+      ws.current = new WebSocket(
+        `${getHydraUrl().replace("http", "ws")}/execute?ticket=` + data.ticket
+      );
+
+      ws.current.addEventListener("open", () => {
+        if (!ws.current) throw new Error("ws.current is null");
+        ws.current.send(
+          JSON.stringify({
+            type: "Run",
+            data: null,
+          })
+        );
+        setStatus("running");
+      });
+
+      ws.current.addEventListener("message", (event) => {
+        const { type, data }: Message = JSON.parse(event.data);
+        if (type === "PtyOutput") {
+          eventsRef.current.emit("terminal:output", data.output);
+        }
+        if (type === "PtyExit") {
+          ws.current?.close(1000);
+          setStatus("idle");
+        }
+      });
+
+      ws.current.addEventListener("close", (e) => {
+        if (!e.wasClean) {
+          console.error(
+            `[${data.ticket.slice(0, 5)}] Not a clean close | Code: ${e.code}`
+          );
+          console.error(e);
+          setStatus("error");
+        } else {
+          console.log(
+            `[${data.ticket.slice(0, 5)}] Clean close | Code: ${e.code}`
+          );
+          setStatus("idle");
+        }
+      });
+    },
+    [toast]
+  );
 
   const crash = useCallback(() => {
     if (!ws.current) return;
