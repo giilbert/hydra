@@ -1,6 +1,9 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicI32, Ordering},
+        Arc,
+    },
 };
 
 use tokio::sync::{mpsc, Notify, RwLock};
@@ -10,6 +13,7 @@ use crate::Container;
 type Queue = Arc<RwLock<VecDeque<mpsc::Sender<Container>>>>;
 
 static CONTAINER_QUEUE_NOTIFY: Notify = Notify::const_new();
+static CREATING_CONTAINER_COUNT: AtomicI32 = AtomicI32::new(0);
 
 #[derive(Debug)]
 pub struct ContainerPool {
@@ -34,17 +38,14 @@ impl ContainerPool {
                 let containers_clone = containers_clone.clone();
                 let deletion_tx_clone = deletion_tx_clone.clone();
 
-                // if the amount of containers in the pool is less
-                // than the declared pool_size, spawn a new container
-                //
-                // TODO:
-                // If multiple containers are deleted at almost the same time,
-                // this will spawn multiple containers. This is not a big deal, as
-                // the pool will eventually reach the desired size and we have a
-                // sizeable amount of memory to spare, but it would be nice to
-                // avoid this.
-                if containers_clone.read().await.len() < pool_size as usize {
+                // TODO: test this?
+                let amount_after_creation = containers_clone.read().await.len() as i32
+                    + CREATING_CONTAINER_COUNT.load(Ordering::SeqCst);
+
+                if amount_after_creation < pool_size as i32 {
                     tokio::spawn(async move {
+                        CREATING_CONTAINER_COUNT.fetch_add(1, Ordering::Relaxed);
+
                         let new_container = Container::new(Some(deletion_tx_clone.clone()))
                             .await
                             .expect("error creating container.");
@@ -54,6 +55,7 @@ impl ContainerPool {
                             .insert(new_container.docker_id.clone(), new_container);
 
                         CONTAINER_QUEUE_NOTIFY.notify_waiters();
+                        CREATING_CONTAINER_COUNT.fetch_sub(1, Ordering::Relaxed);
                     });
                 }
             }
