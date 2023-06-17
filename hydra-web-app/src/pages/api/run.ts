@@ -47,7 +47,7 @@ export const config = {
 const handler = async (req: NextRequest) => {
   const url = getHydraUrl();
   const requestUrl =
-    url + "/execute?api_key=" + (process.env.HYDRA_API_KEY || "haydra");
+    url + "/execute?api_key=" + (process.env.HYDRA_API_KEY || "hydra");
 
   const body = requestSchema.safeParse(await req.json());
 
