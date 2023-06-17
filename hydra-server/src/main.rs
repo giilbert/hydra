@@ -1,9 +1,14 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use axum::{
+    extract::Host,
+    handler::HandlerWithoutStateExt,
+    http::{StatusCode, Uri},
+    response::Redirect,
     routing::{get, post},
     Router,
 };
+use axum_server::tls_rustls::RustlsConfig;
 use container::Container;
 use execute::execute;
 use pool::ContainerPool;
@@ -27,6 +32,12 @@ pub struct AppStateInner {
     pub run_requests: HashMap<Uuid, RunRequest>,
     pub container_pool: ContainerPool,
     pub api_key: String,
+}
+
+#[derive(Clone, Copy)]
+struct Ports {
+    http: u16,
+    https: u16,
 }
 
 #[tokio::main]
@@ -54,10 +65,81 @@ async fn main() -> anyhow::Result<()> {
                 .allow_methods(Any),
         );
 
-    log::info!("Server listening on 0.0.0.0:3001");
-    axum::Server::bind(&"0.0.0.0:3001".parse()?)
+    let ports = Ports {
+        http: std::env::var("PORT")
+            .ok()
+            .and_then(|port| port.parse().ok())
+            .unwrap_or(8080),
+        https: std::env::var("PORT_HTTPS")
+            .ok()
+            .and_then(|port| port.parse().ok())
+            .unwrap_or(8443),
+    };
+
+    let config = create_rustls_config().await;
+
+    tokio::spawn(redirect_http_to_https(ports));
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], ports.https));
+    log::info!("HTTPS listening on {}", addr);
+    axum_server::bind_rustls(addr, config)
         .serve(router.into_make_service())
-        .await?;
+        .await
+        .unwrap();
 
     Ok(())
+}
+
+async fn create_rustls_config() -> RustlsConfig {
+    use tokio::fs;
+    // if there is a "certs" directory in the current directory then use those
+    // certificates, otherwise use the default ones in "test-certs"
+
+    let (cert_pem, key_pem) = if fs::try_exists("certs").await.unwrap_or(false) {
+        (
+            fs::read("certs/cert.pem").await.unwrap(),
+            fs::read("certs/key.pem").await.unwrap(),
+        )
+    } else {
+        (
+            fs::read("test-certs/cert.pem").await.unwrap(),
+            fs::read("test-certs/key.pem").await.unwrap(),
+        )
+    };
+
+    RustlsConfig::from_pem(cert_pem, key_pem).await.unwrap()
+}
+
+async fn redirect_http_to_https(ports: Ports) {
+    fn make_https(host: String, uri: Uri, ports: Ports) -> anyhow::Result<Uri> {
+        let mut parts = uri.into_parts();
+
+        parts.scheme = Some(axum::http::uri::Scheme::HTTPS);
+
+        if parts.path_and_query.is_none() {
+            parts.path_and_query = Some("/".parse().unwrap());
+        }
+
+        let https_host = host.replace(&ports.http.to_string(), &ports.https.to_string());
+        parts.authority = Some(https_host.parse()?);
+
+        Ok(Uri::from_parts(parts)?)
+    }
+
+    let redirect = move |Host(host): Host, uri: Uri| async move {
+        match make_https(host, uri, ports) {
+            Ok(uri) => Ok(Redirect::permanent(&uri.to_string())),
+            Err(error) => {
+                log::warn!("failed to convert URI to HTTPS: {}", error);
+                Err(StatusCode::BAD_REQUEST)
+            }
+        }
+    };
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], ports.http));
+    log::info!("HTTP listening on {}", addr);
+    axum::Server::bind(&addr.into())
+        .serve(redirect.into_make_service())
+        .await
+        .unwrap();
 }
