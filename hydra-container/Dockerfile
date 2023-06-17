@@ -1,4 +1,4 @@
-FROM rust:1.66 as builder
+FROM rust:1.70 as builder
 
 WORKDIR /usr/src
 RUN USER=root cargo new hydra-container
