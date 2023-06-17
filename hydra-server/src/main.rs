@@ -62,16 +62,16 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState::new(RwLock::new(AppStateInner {
         run_requests: Default::default(),
+        api_key: std::env::var("HYDRA_API_KEY").unwrap_or_else(|_| {
+            log::warn!("No API key set. Using `hydra`.");
+            "hydra".to_string()
+        }),
         container_pool: ContainerPool::new(if environment == Environment::Development {
             2
         } else {
             5
         })
         .await,
-        api_key: std::env::var("HYDRA_API_KEY").unwrap_or_else(|_| {
-            log::warn!("No API key set. Using `hydra`.");
-            "hydra".to_string()
-        }),
     }));
 
     let router = Router::new()

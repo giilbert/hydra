@@ -30,7 +30,7 @@ pub async fn execute(
         return Err("Invalid API key");
     }
 
-    let mut run_request = RunRequest::new(options, app_state.clone())
+    let run_request = RunRequest::new(options, app_state.clone())
         .await
         .map_err(|e| {
             log::error!("{e}");

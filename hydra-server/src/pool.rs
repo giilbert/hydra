@@ -63,10 +63,12 @@ impl ContainerPool {
 
         // spawn the initial containers that are in the pool
         {
+            let mut handles = vec![];
+
             for _ in 0..pool_size {
                 let deletion_tx_clone = deletion_tx.clone();
                 let containers_clone = containers.clone();
-                tokio::spawn(async move {
+                let handle = tokio::spawn(async move {
                     let new_container = Container::new(Some(deletion_tx_clone.clone()))
                         .await
                         .expect("error creating container.");
@@ -75,7 +77,10 @@ impl ContainerPool {
                         .await
                         .insert(new_container.docker_id.clone(), new_container);
                 });
+                handles.push(handle);
             }
+
+            futures_util::future::join_all(handles).await;
         }
 
         let queue = Queue::default();
