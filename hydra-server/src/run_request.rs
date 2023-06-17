@@ -43,6 +43,7 @@ pub enum ServerMessage {
 #[derive(Debug)]
 pub struct RunRequest {
     pub ticket: Uuid,
+    pub display_id: String,
     container: Arc<RwLock<Container>>,
     self_destruct_timer: Option<JoinHandle<()>>,
     app_state: AppState,
@@ -50,6 +51,7 @@ pub struct RunRequest {
 
 impl RunRequest {
     pub async fn new(options: ExecuteOptions, app_state: AppState) -> anyhow::Result<Self> {
+        let ticket = Uuid::new_v4();
         let mut container = {
             let mut app_state = app_state.write().await;
             let mut recv = app_state.container_pool.take_one().await;
@@ -58,6 +60,11 @@ impl RunRequest {
         .recv()
         .await
         .ok_or_else(|| anyhow::anyhow!("No containers available"))?;
+        log::info!(
+            "[tck-{}] received container {}",
+            &ticket.to_string()[0..5],
+            container.display_id
+        );
 
         container
             .rpc(ContainerRpcRequest::SetupFromOptions {
@@ -67,7 +74,12 @@ impl RunRequest {
             .map_err(|_| anyhow::anyhow!("Error setting up container"))?;
 
         Ok(RunRequest {
-            ticket: Uuid::new_v4(),
+            ticket,
+            display_id: format!(
+                "tck-{}, dok-{}",
+                ticket.to_string()[0..5].to_string(),
+                container.docker_id[0..5].to_string()
+            ),
             container: Arc::new(RwLock::new(container)),
             self_destruct_timer: None,
             app_state,
@@ -86,7 +98,7 @@ impl RunRequest {
             app_state.write().await.run_requests.remove(&ticket);
             let _ = container.write().await.stop().await;
             log::info!(
-                "[{}]: cleaned - prime_self_destruct",
+                "[dok-{}]: cleaned - prime_self_destruct",
                 &container.read().await.docker_id[..5]
             );
         }));
@@ -106,7 +118,7 @@ impl RunRequest {
         let data = match serde_json::from_str::<ClientMessage>(&message) {
             Ok(data) => data,
             Err(e) => {
-                log::error!("Error parsing message: {}", e);
+                log::error!("[{}] Error parsing message: {}", self.display_id, e);
                 return Ok(());
             }
         };
@@ -119,7 +131,7 @@ impl RunRequest {
                     .rpc(ContainerRpcRequest::PtyInput { id, input })
                     .await?
                 {
-                    log::error!("PtyInput error: {}", err)
+                    log::error!("[{}] PtyInput error: {}", self.display_id, err);
                 }
             }
             ClientMessage::Run => {
@@ -130,7 +142,7 @@ impl RunRequest {
                     })
                     .await?
                 {
-                    log::error!("Run error: {}", err);
+                    log::error!("[{}] Run error: {}", self.display_id, err);
                 }
             }
             ClientMessage::Crash => {
@@ -200,14 +212,14 @@ impl RunRequest {
                         Some(Ok(Message::Close(_))) => break,
                         Some(Ok(_)) => continue,
                         Some(Err(e)) => {
-                            log::error!("Error receiving message: {}", e);
+                            log::error!("[{}] Error receiving message: {}", self.display_id, e);
                             break;
                         }
                         None => break,
                     };
 
                     if let Err(err) = self.handle_client_message(message, &mut messages_tx).await {
-                        log::error!("Error handling message: {}", err);
+                        log::error!("[{}] Error handling message: {}", self.display_id, err);
                     }
                 }
                 Some(message_to_send) = messages_rx.recv() => {
@@ -215,7 +227,7 @@ impl RunRequest {
                 }
                 Some(container_message) = container_rx.recv() => {
                     if let Err(err) = self.handle_container_message(container_message, &mut messages_tx).await {
-                        log::error!("Error handling container message: {}", err);
+                        log::error!("[{}] Error handling container message: {}", self.display_id, err);
                     }
                 }
                 _ = stop_rx.changed() => {
@@ -232,15 +244,19 @@ impl RunRequest {
                 .downcast::<WSError>()
                 // i think only tungstenite errors are possible, but idk
                 .map_err(|e| {
-                    anyhow::anyhow!("Received anything but a tungstenite error: {:?}", e)
+                    anyhow::anyhow!(
+                        "[{}] Received anything but a tungstenite error: {:?}",
+                        self.display_id,
+                        e
+                    )
                 })?;
 
             match *inner {
                 WSError::ConnectionClosed => {
-                    log::info!("Connection closed");
+                    log::info!("[{}] Connection closed", self.display_id);
                 }
                 e => {
-                    log::error!("Error closing connection: {}", e);
+                    log::error!("[{}] Error closing connection: {}", self.display_id, e);
                 }
             }
         }

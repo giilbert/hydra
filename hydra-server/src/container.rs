@@ -28,6 +28,7 @@ lazy_static! {
 #[derive(Debug)]
 pub struct Container {
     pub docker_id: String,
+    pub display_id: String,
     pub container_rx: Option<mpsc::Receiver<ContainerSent>>,
     /// An event that is fired when the container is stopped
     pub stop_rx: watch::Receiver<()>,
@@ -61,7 +62,7 @@ impl Container {
         let res = DOCKER
             .create_container(
                 Some(container::CreateContainerOptions {
-                    name: format!("hydra-container-{id}"),
+                    name: format!("hydra-container--tck-{id}"),
                     ..Default::default()
                 }),
                 container::Config {
@@ -79,14 +80,16 @@ impl Container {
             )
             .await?;
 
-        log::info!("Created container: {}", res.id);
+        let display_id = format!("dok-{}", &res.id[0..5]);
+
+        log::info!("Created container: [{display_id}]");
 
         DOCKER.start_container::<String>(&res.id, None).await?;
 
         let ws_stream = match listener.accept().await {
             Ok((stream, _)) => accept_async(stream).await?,
             Err(e) => {
-                log::error!("Error during initial WebSocket Connection: {}", e);
+                log::error!("[{display_id}] Error during initial WebSocket Connection: {e}",);
                 fs::remove_dir_all(&socket_dir).await?;
                 return Err(e.into());
             }
@@ -112,6 +115,7 @@ impl Container {
         Ok(Self {
             _id: id,
             docker_id: res.id,
+            display_id,
             deletion_tx,
             commands_tx,
             rpc_records,
@@ -122,7 +126,7 @@ impl Container {
     }
 
     pub async fn stop(&mut self) -> anyhow::Result<()> {
-        log::info!("[{}]: queued normal stop", &self.docker_id[..5]);
+        log::info!("[{}]: queued normal stop", self.display_id);
         self.commands_tx.send(ContainerCommands::Stop).await?;
         if let Some(deletion_tx) = &self.deletion_tx {
             deletion_tx.send(self.docker_id.clone()).await?;
@@ -163,8 +167,11 @@ async fn run_container(
     deletion_tx: Option<mpsc::Sender<String>>,
 ) -> anyhow::Result<()> {
     let (mut tx, mut rx) = ws_stream.split();
+    let logging_id = format!("dok-{}", &container_id[0..5]);
 
+    // Task to forward logs to the terminal
     let container_id_clone = container_id.clone();
+    let logging_id_clone = logging_id.clone();
     tokio::spawn(async move {
         let mut log_stream = DOCKER.logs(
             &container_id_clone,
@@ -181,7 +188,7 @@ async fn run_container(
                 Some(Ok(msg)) = log_stream.next() => {
                     log::info!(
                         "[{}]: {}",
-                        &container_id_clone[..5],
+                        logging_id_clone,
                         &msg.to_string().trim_end()
                     );
                 }
@@ -204,14 +211,14 @@ async fn run_container(
                                 let response = serde_json::from_str::<Result<Value, String>>(&result).expect("serde_json deserialize error");
                                 let mut rpc_records = rpc_records.lock().await;
                                 if let Err(err) = rpc_records.handle_incoming(id, response) {
-                                    log::error!("Error handling rpc response: {err:#?}");
+                                    log::error!("[{logging_id}] Error handling rpc response: {err:#?}");
                                 };
                             },
                             _ => container_tx.send(msg).await?,
                         }
                     }
                     Err(e) => {
-                        log::error!("Container WebSocket unexpectedly hung up: {}", e);
+                        log::error!("[{logging_id}] Container WebSocket unexpectedly hung up: {}", e);
                         break;
                     }
                     _ => ()
@@ -231,10 +238,11 @@ async fn run_container(
         }
     }
 
-    log::info!("[{}]: broadcasting stop", &container_id[..5]);
+    log::info!("[{logging_id}]: broadcasting stop");
+
     stop.send(()).expect("Error broadcasting stop");
 
-    log::info!("[{}]: closing websocket", &container_id[..5]);
+    log::info!("[{logging_id}]: closing websocket");
     let mut ws_stream = tx.reunite(rx)?;
     let _ = ws_stream.close(None).await;
 
@@ -253,16 +261,15 @@ async fn run_container(
         .await
     {
         log::warn!(
-            "[{}]: THIS MAY OR MAY NOT BE AN ERROR: error removing container: {err}",
-            &container_id[..5]
+            "[{logging_id}]: THIS MAY OR MAY NOT BE AN ERROR: error removing container: {err}"
         );
     }
-
-    log::info!("[{}]: final stop", &container_id[..5]);
 
     if let Some(deletion_tx) = deletion_tx {
         deletion_tx.send(container_id).await?;
     }
+
+    log::info!("[{logging_id}]: final stop");
 
     Ok(())
 }
