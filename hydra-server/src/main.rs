@@ -34,6 +34,12 @@ pub struct AppStateInner {
     pub api_key: String,
 }
 
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum Environment {
+    Development,
+    Production,
+}
+
 #[derive(Clone, Copy)]
 struct Ports {
     http: u16,
@@ -45,9 +51,23 @@ async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
     pretty_env_logger::init();
 
+    let environment = match std::env::var("ENVIRONMENT")
+        .unwrap_or("development".to_string())
+        .as_str()
+    {
+        "production" => Environment::Production,
+        "development" => Environment::Development,
+        _ => panic!("invalid environment"),
+    };
+
     let state = AppState::new(RwLock::new(AppStateInner {
         run_requests: Default::default(),
-        container_pool: ContainerPool::new(5).await,
+        container_pool: ContainerPool::new(if environment == Environment::Development {
+            2
+        } else {
+            5
+        })
+        .await,
         api_key: std::env::var("HYDRA_API_KEY").unwrap_or_else(|_| {
             log::warn!("No API key set. Using `hydra`.");
             "hydra".to_string()
@@ -68,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
     let config = create_rustls_config().await;
 
     // run if it is not a production environment
-    if std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()) != "production" {
+    if environment == Environment::Development {
         app_without_https_redirect(router.clone(), state.clone()).await;
         return Ok(());
     }
