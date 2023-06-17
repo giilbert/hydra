@@ -31,6 +31,8 @@ impl RpcRecords {
         id: Uuid,
         value: Result<Value, String>,
     ) -> anyhow::Result<()> {
+        log::debug!("Got RPC response (unsorted): {:?}", value);
+
         if let Some(tx) = self.records.remove(&id) {
             if let Err(v) = tx.send(value) {
                 log::error!("Failed to send rpc value: {:?}", v);

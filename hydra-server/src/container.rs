@@ -30,6 +30,7 @@ pub struct Container {
     pub docker_id: String,
     pub display_id: String,
     pub container_rx: Option<mpsc::Receiver<ContainerSent>>,
+    pub stop: Arc<watch::Sender<()>>,
     /// An event that is fired when the container is stopped
     pub stop_rx: watch::Receiver<()>,
     pub stopped: bool,
@@ -53,6 +54,7 @@ impl Container {
         let cwd = std::env::current_dir()?;
         let socket_dir = cwd.join(format!("sockets/{}", id));
         let (stop, stop_rx) = watch::channel(());
+        let stop = Arc::new(stop);
 
         fs::create_dir_all(&socket_dir).await?;
 
@@ -107,7 +109,7 @@ impl Container {
             rpc_records.clone(),
             container_tx,
             socket_dir.clone(),
-            stop,
+            stop.clone(),
             stop_rx.clone(),
             deletion_tx.clone(),
         ));
@@ -120,6 +122,7 @@ impl Container {
             commands_tx,
             rpc_records,
             container_rx: Some(container_rx),
+            stop,
             stop_rx,
             stopped: false,
         })
@@ -138,6 +141,7 @@ impl Container {
     pub async fn rpc(&mut self, req: ContainerRpcRequest) -> anyhow::Result<Result<Value, String>> {
         let id = Uuid::new_v4();
 
+        log::debug!("[{}]: sent RPC request", self.display_id);
         self.commands_tx
             .send(ContainerCommands::SendMessage(HostSent::RpcRequest {
                 id,
@@ -145,11 +149,14 @@ impl Container {
             }))
             .await?;
 
+        log::debug!("[{}]: waiting for RPC response", self.display_id);
         let response = tokio::select! {
             d = self.rpc_records.lock().await.await_response(id).await? => d,
             _ = self.stop_rx.changed() => anyhow::bail!("container stopped during RPC")
         };
         let res = response?;
+
+        log::debug!("[{}]: got RPC response", self.display_id);
 
         Ok(res)
     }
@@ -162,11 +169,11 @@ async fn run_container(
     rpc_records: Arc<Mutex<RpcRecords>>,
     container_tx: mpsc::Sender<ContainerSent>,
     socket_dir: PathBuf,
-    stop: watch::Sender<()>,
+    stop: Arc<watch::Sender<()>>,
     mut stop_rx: watch::Receiver<()>,
     deletion_tx: Option<mpsc::Sender<String>>,
 ) -> anyhow::Result<()> {
-    let (mut tx, mut rx) = ws_stream.split();
+    let (mut container_ws_tx, mut container_ws_rx) = ws_stream.split();
     let logging_id = format!("dok-{}", &container_id[0..5]);
 
     // Task to forward logs to the terminal
@@ -187,7 +194,7 @@ async fn run_container(
             tokio::select! {
                 Some(Ok(msg)) = log_stream.next() => {
                     log::info!(
-                        "[{}]: {}",
+                        "[{}] [LOG]: {}",
                         logging_id_clone,
                         &msg.to_string().trim_end()
                     );
@@ -201,15 +208,22 @@ async fn run_container(
 
     loop {
         tokio::select! {
-            Some(msg) = rx.next() => {
+            Some(msg) = container_ws_rx.next() => {
                 match msg {
                     Ok(Message::Binary(bin)) => {
                         let msg = rmp_serde::from_slice::<ContainerSent>(&bin).expect("rmp_serde deserialize error");
 
+                        match &msg {
+                            ContainerSent::PtyOutput { .. } => (),
+                            msg => log::debug!("[{logging_id}] Got message: {:#?}", msg)
+                        }
+
                         match msg {
                             ContainerSent::RpcResponse { id, result } => {
                                 let response = serde_json::from_str::<Result<Value, String>>(&result).expect("serde_json deserialize error");
+                                log::debug!("Got rpc response: {:#?}", response);
                                 let mut rpc_records = rpc_records.lock().await;
+                                log::debug!("Handling rpc response");
                                 if let Err(err) = rpc_records.handle_incoming(id, response) {
                                     log::error!("[{logging_id}] Error handling rpc response: {err:#?}");
                                 };
@@ -221,14 +235,16 @@ async fn run_container(
                         log::error!("[{logging_id}] Container WebSocket unexpectedly hung up: {}", e);
                         break;
                     }
-                    _ => ()
+                    _ => log::warn!("[{logging_id}] Got unexpected message: {:#?}", msg)
                 }
             }
             Some(msg) = commands_rx.recv() => {
                 match msg {
                     ContainerCommands::SendMessage(msg) => {
                         let bin = rmp_serde::to_vec_named(&msg).expect("rmp serde serialize error");
-                        tx.send(Message::Binary(bin)).await?;
+                        log::debug!("[{logging_id}] Sending message: {:#?}", msg);
+                        container_ws_tx.send(Message::Binary(bin)).await?;
+                        log::debug!("[{logging_id}] Sent message: {:#?}", msg);
                     }
                     ContainerCommands::Stop => {
                         break;
@@ -240,10 +256,10 @@ async fn run_container(
 
     log::info!("[{logging_id}]: broadcasting stop");
 
-    stop.send(()).expect("Error broadcasting stop");
+    let _ = stop.send(());
 
     log::info!("[{logging_id}]: closing websocket");
-    let mut ws_stream = tx.reunite(rx)?;
+    let mut ws_stream = container_ws_tx.reunite(container_ws_rx)?;
     let _ = ws_stream.close(None).await;
 
     fs::remove_dir_all(&socket_dir)
@@ -261,7 +277,7 @@ async fn run_container(
         .await
     {
         log::warn!(
-            "[{logging_id}]: THIS MAY OR MAY NOT BE AN ERROR: error removing container: {err}"
+            "[{logging_id}]: !!THIS MAY OR MAY NOT BE AN ERROR!! error removing container: {err}"
         );
     }
 

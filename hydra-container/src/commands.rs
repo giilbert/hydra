@@ -1,12 +1,15 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use parking_lot::{Mutex, RwLock};
 use protocol::{ContainerSent, HostSent};
-use tokio::{fs, net::UnixStream, sync::mpsc};
+use tokio::{
+    fs,
+    net::UnixStream,
+    sync::{mpsc, Mutex},
+};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
 use crate::{
@@ -32,7 +35,7 @@ pub struct Commands {
 impl Commands {
     pub fn new(ws: WebSocketStream<UnixStream>) -> Self {
         let (ws_tx, ws_rx) = ws.split();
-        let (commands_tx, commands_rx) = mpsc::channel(32);
+        let (commands_tx, commands_rx) = mpsc::channel(512);
 
         Self {
             state: Arc::new(Mutex::new(State::new(commands_tx.clone()))),
@@ -54,7 +57,7 @@ impl Commands {
                         }
                     }
                     Command::RemovePty(id) => {
-                        state.lock().remove_pty(id);
+                        state.lock().await.remove_pty(id);
                     }
                 }
             }
@@ -64,6 +67,8 @@ impl Commands {
 
         while let Some(Ok(Message::Binary(msg))) = self.ws_rx.next().await {
             let msg = rmp_serde::from_slice::<HostSent>(&msg);
+
+            log::debug!("Received HostSent message: {:?}", msg);
 
             let msg = match msg {
                 Ok(m) => m,
@@ -87,13 +92,18 @@ impl Commands {
                     };
 
                     self.commands_tx
-                        .send(Command::Send(Message::Binary(rmp_serde::to_vec_named(
-                            &ContainerSent::RpcResponse {
-                                id,
-                                result: serde_json::to_string(&res)?,
-                            },
-                        )?)))
+                        .send_timeout(
+                            Command::Send(Message::Binary(rmp_serde::to_vec_named(
+                                &ContainerSent::RpcResponse {
+                                    id,
+                                    result: serde_json::to_string(&res)?,
+                                },
+                            )?)),
+                            Duration::from_millis(100),
+                        )
                         .await?;
+
+                    log::debug!("Sent RPC response: {:?}", res);
                 }
             }
         }

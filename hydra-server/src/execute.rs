@@ -38,7 +38,7 @@ pub async fn execute(
         })?;
 
     let ticket = run_request.ticket.clone();
-    run_request.prime_self_destruct();
+    run_request.prime_self_destruct().await;
 
     app_state
         .write()

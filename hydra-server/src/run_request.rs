@@ -5,7 +5,7 @@ use futures_util::{SinkExt, StreamExt};
 use protocol::{ContainerRpcRequest, ContainerSent, ExecuteOptions};
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::{mpsc, RwLock},
+    sync::{mpsc, Mutex, RwLock},
     task::JoinHandle,
 };
 use uuid::Uuid;
@@ -45,7 +45,7 @@ pub struct RunRequest {
     pub ticket: Uuid,
     pub display_id: String,
     container: Arc<RwLock<Container>>,
-    self_destruct_timer: Option<JoinHandle<()>>,
+    self_destruct_timer: Mutex<Option<JoinHandle<()>>>,
     app_state: AppState,
 }
 
@@ -81,18 +81,18 @@ impl RunRequest {
                 container.docker_id[0..5].to_string()
             ),
             container: Arc::new(RwLock::new(container)),
-            self_destruct_timer: None,
+            self_destruct_timer: Mutex::new(None),
             app_state,
         })
     }
 
     /// After a set duration of inactivity, clean the container up
-    pub fn prime_self_destruct(&mut self) {
+    pub async fn prime_self_destruct(&self) {
         let app_state = self.app_state.clone();
         let ticket = self.ticket.clone();
         let container = self.container.clone();
 
-        self.self_destruct_timer = Some(tokio::spawn(async move {
+        *self.self_destruct_timer.lock().await = Some(tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
             app_state.write().await.run_requests.remove(&ticket);
@@ -104,14 +104,14 @@ impl RunRequest {
         }));
     }
 
-    pub fn cancel_self_destruct(&mut self) {
-        if let Some(handle) = self.self_destruct_timer.take() {
+    pub async fn cancel_self_destruct(&mut self) {
+        if let Some(handle) = self.self_destruct_timer.lock().await.take() {
             handle.abort();
         }
     }
 
     async fn handle_client_message(
-        &mut self,
+        &self,
         message: String,
         _messages_tx: &mut mpsc::Sender<Message>,
     ) -> anyhow::Result<()> {
@@ -157,7 +157,6 @@ impl RunRequest {
     }
 
     async fn send_client_message(
-        &mut self,
         message: ServerMessage,
         messages_tx: &mut mpsc::Sender<Message>,
     ) -> anyhow::Result<()> {
@@ -170,18 +169,15 @@ impl RunRequest {
     }
 
     async fn handle_container_message(
-        &mut self,
         message: ContainerSent,
         messages_tx: &mut mpsc::Sender<Message>,
     ) -> anyhow::Result<()> {
         match message {
             ContainerSent::PtyOutput { output, .. } => {
-                self.send_client_message(ServerMessage::PtyOutput { output }, messages_tx)
-                    .await?;
+                Self::send_client_message(ServerMessage::PtyOutput { output }, messages_tx).await?;
             }
             ContainerSent::PtyExit { id } => {
-                self.send_client_message(ServerMessage::PtyExit { id }, messages_tx)
-                    .await?;
+                Self::send_client_message(ServerMessage::PtyExit { id }, messages_tx).await?;
             }
             _ => (),
         }
@@ -191,12 +187,14 @@ impl RunRequest {
 
     pub async fn handle_websocket_connection(mut self, ws: WebSocket) -> anyhow::Result<()> {
         let mut stop_rx = self.container.read().await.stop_rx.clone();
-        self.cancel_self_destruct();
+        self.cancel_self_destruct().await;
+
+        let this = Arc::new(self);
 
         let (mut messages_tx, mut messages_rx) = mpsc::channel::<Message>(100);
-        let (mut ws_tx, mut ws_rx) = ws.split();
+        let (ws_tx, mut ws_rx) = ws.split();
 
-        let mut container_rx = self
+        let mut container_rx = this
             .container
             .write()
             .await
@@ -204,6 +202,47 @@ impl RunRequest {
             .take()
             .expect("container already taken");
 
+        // this task handles messages from the container
+        let display_id_clone = this.display_id.clone();
+        let mut messages_tx_clone = messages_tx.clone();
+        let mut stop_rx_clone = stop_rx.clone();
+        let container_message_task = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some(container_message) = container_rx.recv() => {
+                        if let Err(err) = Self::handle_container_message(container_message, &mut messages_tx_clone).await {
+                            log::error!("[{}] Error handling container message: {}", display_id_clone, err);
+                        }
+                    }
+                    _ = stop_rx_clone.changed() => {
+                        break
+                    }
+                }
+            }
+        });
+
+        // this task forwards messages to the client
+        let this_clone = this.clone();
+        let mut stop_rx_clone = stop_rx.clone();
+        // takes ws_tx and then puts it back when the task is done
+        let maybe_ws_tx = Arc::new(Mutex::new(Some(ws_tx)));
+        let maybe_ws_tx_clone = maybe_ws_tx.clone();
+        let client_sender_task = tokio::spawn(async move {
+            let mut ws_tx = maybe_ws_tx_clone.lock().await.take().unwrap();
+            loop {
+                tokio::select! {
+                    Some(message_to_send) = messages_rx.recv() => {
+                        let _ = ws_tx.send(message_to_send).await;
+                    }
+                    _ = stop_rx_clone.changed() => {
+                        break
+                    }
+                }
+            }
+            *maybe_ws_tx_clone.lock().await = Some(ws_tx);
+        });
+
+        // this task handles messages from the client
         loop {
             tokio::select! {
                 message = ws_rx.next() => {
@@ -212,31 +251,36 @@ impl RunRequest {
                         Some(Ok(Message::Close(_))) => break,
                         Some(Ok(_)) => continue,
                         Some(Err(e)) => {
-                            log::error!("[{}] Error receiving message: {}", self.display_id, e);
+                            log::error!("[{}] Error receiving message: {}", this_clone.display_id, e);
                             break;
                         }
                         None => break,
                     };
 
-                    log::debug!("[{}] Got client message: {}", self.display_id, message);
+                    log::debug!("[{}] Got client message: {}", this_clone.display_id, message);
 
-                    if let Err(err) = self.handle_client_message(message, &mut messages_tx).await {
-                        log::error!("[{}] Error handling message: {}", self.display_id, err);
+                    if let Err(err) = this_clone.handle_client_message(message, &mut messages_tx).await {
+                        log::error!("[{}] Error handling message: {}", this_clone.display_id, err);
                     }
-                }
-                Some(message_to_send) = messages_rx.recv() => {
-                    ws_tx.send(message_to_send).await?;
-                }
-                Some(container_message) = container_rx.recv() => {
-                    if let Err(err) = self.handle_container_message(container_message, &mut messages_tx).await {
-                        log::error!("[{}] Error handling container message: {}", self.display_id, err);
-                    }
+
+                    log::debug!("[{}] Handled client message", this_clone.display_id);
                 }
                 _ = stop_rx.changed() => {
                     break
                 }
             }
         }
+
+        log::debug!("[{}] Closing websocket", this.display_id);
+
+        let _ = this.container.read().await.stop.send(());
+        client_sender_task.await?;
+        container_message_task.await?;
+        let ws_tx = maybe_ws_tx
+            .lock()
+            .await
+            .take()
+            .expect("ws_tx not given back");
 
         if let Err(e) = ws_rx.reunite(ws_tx)?.close().await {
             use tokio_tungstenite::tungstenite::Error as WSError;
@@ -248,21 +292,22 @@ impl RunRequest {
                 .map_err(|e| {
                     anyhow::anyhow!(
                         "[{}] Received anything but a tungstenite error: {:?}",
-                        self.display_id,
+                        this.display_id,
                         e
                     )
                 })?;
 
             match *inner {
                 WSError::ConnectionClosed => {
-                    log::info!("[{}] Connection closed", self.display_id);
+                    log::info!("[{}] Connection closed", this.display_id);
                 }
                 e => {
-                    log::error!("[{}] Error closing connection: {}", self.display_id, e);
+                    log::error!("[{}] Error closing connection: {}", this.display_id, e);
                 }
             }
         }
-        self.prime_self_destruct();
+
+        this.prime_self_destruct().await;
 
         Ok(())
     }

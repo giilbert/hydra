@@ -1,10 +1,12 @@
 use std::{path::PathBuf, sync::Arc};
 
-use parking_lot::Mutex;
 use portable_pty::CommandBuilder;
 use protocol::ContainerRpcRequest;
 use serde_json::{json, Value};
-use tokio::{fs, sync::mpsc};
+use tokio::{
+    fs,
+    sync::{mpsc, Mutex},
+};
 
 use crate::{commands::Command, pty, state::State};
 
@@ -13,7 +15,7 @@ pub async fn handle_rpc_procedure(
     req: ContainerRpcRequest,
     state: Arc<Mutex<State>>,
 ) -> anyhow::Result<Result<Value, String>> {
-    log::info!("Got RPC: {:?}", req);
+    log::debug!("Got RPC: {:?}", req);
 
     match req {
         ContainerRpcRequest::PtyCreate { command, arguments } => {
@@ -23,7 +25,7 @@ pub async fn handle_rpc_procedure(
             }
 
             let pty = pty::create(cmd).await?;
-            let id = state.lock().register_pty(pty.commands_tx.clone());
+            let id = state.lock().await.register_pty(pty.commands_tx.clone());
 
             tokio::spawn(pty.send_output(commands.clone()));
 
@@ -31,7 +33,7 @@ pub async fn handle_rpc_procedure(
         }
         ContainerRpcRequest::PtyInput { id, input } => {
             // panic!();
-            let mut state = state.lock();
+            let mut state = state.lock().await;
             let pty = state
                 .get_pty(id)
                 .ok_or_else(|| anyhow::anyhow!("cannot find pty"))?;
