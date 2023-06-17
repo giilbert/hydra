@@ -1,5 +1,4 @@
 import { getHydraUrl } from "@/hydra/protocol";
-import { NextApiHandler, NextApiRequest, NextApiResponse } from "next";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -47,7 +46,8 @@ export const config = {
 
 const handler = async (req: NextRequest) => {
   const url = getHydraUrl();
-  const requestUrl = url + "/execute?api_key=" + process.env.HYDRA_API_KEY;
+  const requestUrl =
+    url + "/execute?api_key=" + (process.env.HYDRA_API_KEY || "haydra");
 
   const body = requestSchema.safeParse(await req.json());
 
@@ -72,6 +72,16 @@ const handler = async (req: NextRequest) => {
       "Content-Type": "application/json",
     },
   });
+
+  if (!hydraResponse.ok) {
+    return NextResponse.json(
+      {
+        error: "Hydra error",
+        details: await hydraResponse.text(),
+      },
+      { status: 500 }
+    );
+  }
 
   const data: { ticket: string } = await hydraResponse.json();
 
