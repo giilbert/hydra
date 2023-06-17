@@ -218,6 +218,8 @@ impl RunRequest {
                         None => break,
                     };
 
+                    log::debug!("[{}] Got client message: {}", self.display_id, message);
+
                     if let Err(err) = self.handle_client_message(message, &mut messages_tx).await {
                         log::error!("[{}] Error handling message: {}", self.display_id, err);
                     }

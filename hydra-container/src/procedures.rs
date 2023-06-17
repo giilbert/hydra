@@ -13,6 +13,8 @@ pub async fn handle_rpc_procedure(
     req: ContainerRpcRequest,
     state: Arc<Mutex<State>>,
 ) -> anyhow::Result<Result<Value, String>> {
+    log::info!("Got RPC: {:?}", req);
+
     match req {
         ContainerRpcRequest::PtyCreate { command, arguments } => {
             let mut cmd = CommandBuilder::new(command);
