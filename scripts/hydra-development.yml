@@ -19,4 +19,5 @@ services:
         target: /tmp/hydra
     environment:
       - ENVIRONMENT=development
+    tty: true
     
