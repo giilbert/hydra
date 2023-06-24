@@ -11,7 +11,6 @@ ROOT="$(git rev-parse --show-toplevel)"
 echo ">>> ${C_PURPLE}Hydra${C_RESET} - dev script"
 echo " |- Commit $(git log -1 --format='%h')"
 echo " |- $(docker --version)"
-
 echo ""
 
 # check that a /tmp/hydra exists
@@ -23,5 +22,9 @@ if [ ! -d "/tmp/hydra" ]; then
 fi
 
 echo ">>> ${C_PURPLE}Running${C_RESET} hydra-server"
+echo "${C_BLUE}\$${C_RESET} cd ${ROOT}/scripts"
+echo ""
+cd ${ROOT}/scripts
+
 echo "${C_BLUE}\$${C_RESET} docker compose --file hydra-development.yml up"
 docker compose --file hydra-development.yml up
