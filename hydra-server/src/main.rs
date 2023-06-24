@@ -34,10 +34,23 @@ pub struct AppStateInner {
     pub api_key: String,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 enum Environment {
     Development,
     Production,
+}
+
+impl Environment {
+    pub fn get() -> Self {
+        match std::env::var("ENVIRONMENT")
+            .unwrap_or("development".to_string())
+            .as_str()
+        {
+            "production" => Environment::Production,
+            "development" => Environment::Development,
+            _ => panic!("invalid environment"),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -51,14 +64,8 @@ async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
     pretty_env_logger::init();
 
-    let environment = match std::env::var("ENVIRONMENT")
-        .unwrap_or("development".to_string())
-        .as_str()
-    {
-        "production" => Environment::Production,
-        "development" => Environment::Development,
-        _ => panic!("invalid environment"),
-    };
+    let environment = Environment::get();
+    log::info!("Hello! Environment: {:?}", environment);
 
     let state = AppState::new(RwLock::new(AppStateInner {
         run_requests: Default::default(),
@@ -85,13 +92,13 @@ async fn main() -> anyhow::Result<()> {
                 .allow_methods(Any),
         );
 
-    let config = create_rustls_config().await;
-
     // run if it is not a production environment
     if environment == Environment::Development {
         app_without_https_redirect(router.clone(), state.clone()).await;
         return Ok(());
     }
+
+    let config = create_rustls_config().await;
 
     let ports = Ports {
         http: 80,
@@ -120,6 +127,9 @@ async fn create_rustls_config() -> RustlsConfig {
             fs::read("certs/key.pem").await.unwrap(),
         )
     } else {
+        log::warn!(
+            "Using default test SSL certificates, this is insecure and will definitely not work."
+        );
         (
             fs::read("test-certs/cert.pem").await.unwrap(),
             fs::read("test-certs/key.pem").await.unwrap(),

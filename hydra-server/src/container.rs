@@ -13,7 +13,7 @@ use tokio::{
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
 
-use crate::rpc::RpcRecords;
+use crate::{rpc::RpcRecords, Environment};
 
 lazy_static! {
     static ref DOCKER: Docker =
@@ -51,8 +51,12 @@ pub enum ContainerCommands {
 impl Container {
     pub async fn new(deletion_tx: Option<mpsc::Sender<String>>) -> anyhow::Result<Self> {
         let id = Uuid::new_v4();
-        let cwd = std::env::current_dir()?;
-        let socket_dir = cwd.join(format!("sockets/{}", id));
+        let run_dir = if Environment::get() == Environment::Production {
+            PathBuf::from("/run/hydra")
+        } else {
+            PathBuf::from("/tmp/hydra")
+        };
+        let socket_dir = run_dir.join(format!("sockets/{}", id));
         let (stop, stop_rx) = watch::channel(());
         let stop = Arc::new(stop);
 
@@ -70,7 +74,10 @@ impl Container {
                 container::Config {
                     image: Some("hydra-container"),
                     host_config: Some(HostConfig {
-                        binds: Some(vec![format!("{}:/run/hydra", socket_dir.to_string_lossy())]),
+                        binds: Some(vec![format!(
+                            "{}:/run/hydra",
+                            run_dir.join(&socket_dir).to_string_lossy()
+                        )]),
                         auto_remove: Some(true),
                         cpu_quota: Some(20000),
                         cpuset_cpus: Some("0-1".into()),
@@ -85,6 +92,7 @@ impl Container {
         let display_id = format!("dok-{}", &res.id[0..5]);
 
         log::info!("Created container: [{display_id}]");
+        log::info!("Full ID: {}", res.id);
 
         DOCKER.start_container::<String>(&res.id, None).await?;
 

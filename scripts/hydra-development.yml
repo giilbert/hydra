@@ -1,0 +1,22 @@
+# USE THIS FOR DEVELOPMENT
+
+version: "3"
+
+services:
+  hydra-server:
+    container_name: "hydra-server"
+    image: "hydra-server:latest"
+    network_mode: "host"
+    volumes:
+      # expose the docker socket for docker API requests
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+      # this is the directory in which container sockets are created
+      # and are needed by the containers (which are created on the host OS)
+      - type: bind
+        source: /tmp/hydra
+        target: /tmp/hydra
+    environment:
+      - ENVIRONMENT=development
+    
