@@ -32,23 +32,30 @@ echo "${C_BLUE}\$${C_RESET} docker build --file ./scripts/container.dockerfile -
 docker build --file ./scripts/container.dockerfile -t hydra-container .
 
 # ---------- Goodbye ----------
+
 echo ""
 
 echo ">>> ${C_PURPLE}Done!${C_RESET}"
 echo " |- ${C_PURPLE}hydra-server${C_RESET} and ${C_PURPLE}hydra-container${C_RESET} built successfully"
-echo " |- Run in development with ${C_BLUE}./dev.sh${C_RESET} in the scripts directory"
-echo " |- Would you like to run it now? (y/n)"
-read option
 
-if [ "$option" = "y" ]; then
-  echo "${C_BLUE}\$${C_RESET} cd ${ROOT}/scripts"
+# only ask to run if running in a terminal
+if [ -t 0 ] ; then
+  echo    " |- Run in development with ${C_BLUE}./dev.sh${C_RESET} in the scripts directory"
+  echo -n " |- Would you like to run it now? (y/n) "
+  read -d"" -s -n1 option
   echo ""
-  cd ${ROOT}/scripts
-  echo "${C_BLUE}\$${C_RESET} chmod +x ./dev.sh"
   echo ""
-  chmod +x ./dev.sh
-  echo "${C_BLUE}\$${C_RESET} ./dev.sh"
-  echo ""
-  ./dev.sh
+
+  if [ "$option" = "y" ]; then
+    echo "${C_BLUE}\$${C_RESET} cd ${ROOT}/scripts"
+    echo ""
+    cd ${ROOT}/scripts
+    echo "${C_BLUE}\$${C_RESET} chmod +x ./dev.sh"
+    echo ""
+    chmod +x ./dev.sh
+    echo "${C_BLUE}\$${C_RESET} ./dev.sh"
+    echo ""
+    ./dev.sh
+  fi
 fi
 
