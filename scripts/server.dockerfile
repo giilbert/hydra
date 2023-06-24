@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/usr/src/hydra/target touch hydra-server/src/main.
     && mv target/release/hydra-server /bin/hydra-server
 
 # hydra-server
-FROM debian:latest
+FROM debian:buster-slim
 RUN apt update \
     && apt install -y libssl-dev ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/*
