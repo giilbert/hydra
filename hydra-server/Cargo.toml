@@ -25,3 +25,5 @@ tower-http = { version = "0.3.5", features = ["cors"] }
 console-subscriber = "0.1.9"
 pretty_env_logger = "0.4.0"
 axum-server = { version = "0.5.1", features = ["tls-rustls"] }
+serde-humanize-rs = "0.1.1"
+toml = "0.7.5"

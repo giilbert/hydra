@@ -13,7 +13,7 @@ use tokio::{
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
 
-use crate::{rpc::RpcRecords, Environment};
+use crate::{config::Config, rpc::RpcRecords, Environment};
 
 lazy_static! {
     static ref DOCKER: Docker =
@@ -79,9 +79,9 @@ impl Container {
                             run_dir.join(&socket_dir).to_string_lossy()
                         )]),
                         auto_remove: Some(true),
-                        cpu_quota: Some(20000),
-                        cpuset_cpus: Some("0-1".into()),
-                        memory: Some(16 * 1000 * 1000),
+                        cpu_quota: Some(Config::global().docker.cpu_shares),
+                        cpuset_cpus: Some(Config::global().docker.cpu_set.clone()),
+                        memory: Some(Config::global().docker.memory.try_into()?),
                         ..Default::default()
                     }),
                     ..Default::default()

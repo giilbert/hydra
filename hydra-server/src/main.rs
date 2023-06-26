@@ -17,8 +17,9 @@ use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
 
-use crate::execute::execute_websocket;
+use crate::{config::Config, execute::execute_websocket};
 
+mod config;
 mod container;
 mod execute;
 mod pool;
@@ -63,6 +64,7 @@ struct Ports {
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
     pretty_env_logger::init();
+    Config::global();
 
     let environment = Environment::get();
     log::info!("Hello! Environment: {:?}", environment);

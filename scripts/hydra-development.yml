@@ -17,6 +17,9 @@ services:
       - type: bind
         source: /tmp/hydra
         target: /tmp/hydra
+      - type: bind
+        source: ../test-config/config.toml
+        target: /etc/hydra/config.toml
     environment:
       - ENVIRONMENT=development
     tty: true
