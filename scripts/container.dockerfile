@@ -1,4 +1,4 @@
-FROM rust:1.70 as builder
+FROM rust:1.70-buster as builder
 
 WORKDIR /usr/src/hydra
 
@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/usr/src/hydra/target touch hydra-container/src/ma
     && mv target/release/hydra-container /bin/hydra-container
 
 # hydra-container
-FROM debian:latest
+FROM debian:buster
 RUN apt update \
     && apt install -y libssl-dev ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/*
