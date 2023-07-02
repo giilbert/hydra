@@ -176,7 +176,7 @@ async fn redirect_http_to_https(ports: Ports) {
 }
 
 async fn app_without_https_redirect(router: Router<AppState>, state: AppState) {
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3100));
     log::info!("Plain HTTP listening on {}", addr);
     axum::Server::bind(&addr.into())
         .serve(router.with_state(state).into_make_service())
