@@ -6,7 +6,6 @@ services:
   hydra-server:
     container_name: "hydra-server"
     image: "hydra-server:latest"
-    network_mode: "host"
     volumes:
       # expose the docker socket for docker API requests
       - type: bind
@@ -23,4 +22,6 @@ services:
     environment:
       - ENVIRONMENT=development
     tty: true
+    ports:
+      - "3100:3100"
     
