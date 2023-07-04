@@ -29,7 +29,7 @@ pub async fn handle_rpc_procedure(
 
             tokio::spawn(pty.send_output(commands.clone()));
 
-            return Ok(Ok(json!({ "id": id })));
+            return Ok(Ok(json!(id)));
         }
         ContainerRpcRequest::PtyInput { id, input } => {
             // panic!();

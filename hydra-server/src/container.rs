@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use bollard::{container, service::HostConfig, Docker};
 use futures_util::{SinkExt, StreamExt};
 use lazy_static::lazy_static;
-use protocol::{ContainerRpcRequest, ContainerSent, HostSent};
+use protocol::{ContainerRpcRequest, ContainerSent, ExecuteOptions, HostSent};
 use serde_json::Value;
 use tokio::{
     fs,
@@ -167,6 +167,39 @@ impl Container {
         log::debug!("[{}]: got RPC response", self.display_id);
 
         Ok(res)
+    }
+
+    pub async fn rpc_setup_from_options(&mut self, options: ExecuteOptions) -> anyhow::Result<()> {
+        self.rpc(ContainerRpcRequest::SetupFromOptions {
+            files: options.files,
+        })
+        .await?
+        .map_err(|e| anyhow::anyhow!("container failed to setup from options: {:?}", e))?;
+
+        Ok(())
+    }
+
+    pub async fn rpc_pty_create(
+        &mut self,
+        command: String,
+        arguments: Vec<String>,
+    ) -> anyhow::Result<u64> {
+        let response = self
+            .rpc(ContainerRpcRequest::PtyCreate { command, arguments })
+            .await?
+            .map_err(|e| anyhow::anyhow!("container failed to create pty: {:?}", e))?;
+
+        Ok(response
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("invalid pty id"))?)
+    }
+
+    pub async fn rpc_pty_input(&mut self, pty_id: u32, input: String) -> anyhow::Result<()> {
+        self.rpc(ContainerRpcRequest::PtyInput { id: pty_id, input })
+            .await?
+            .map_err(|e| anyhow::anyhow!("error inputting: {:?}", e))?;
+
+        Ok(())
     }
 }
 
