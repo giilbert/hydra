@@ -53,7 +53,7 @@ impl RunRequest {
     pub async fn new(options: ExecuteOptions, app_state: AppState) -> anyhow::Result<Self> {
         let ticket = Uuid::new_v4();
         let mut container = {
-            let mut app_state = app_state.write().await;
+            let app_state = app_state.read().await;
             let mut recv = app_state.container_pool.take_one().await;
             recv
         }

@@ -17,7 +17,10 @@ use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
 
-use crate::{config::Config, execute::execute_websocket};
+use crate::{
+    config::Config,
+    execute::{execute_headless, execute_websocket},
+};
 
 mod config;
 mod container;
@@ -86,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
     let router = Router::new()
         .route("/", get(|| async { "Hydra" }))
         .route("/execute", post(execute).get(execute_websocket))
+        .route("/execute-headless", post(execute_headless))
         .with_state(state.clone())
         .layer(
             CorsLayer::new()
