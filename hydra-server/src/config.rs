@@ -6,6 +6,8 @@ static GLOBAL_CONFIG: OnceLock<Config> = OnceLock::new();
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
+    #[serde(default)]
+    pub use_https: bool,
     pub docker: DockerConfig,
 }
 

@@ -19,7 +19,7 @@ static CREATING_CONTAINER_COUNT: AtomicI32 = AtomicI32::new(0);
 pub struct ContainerPool {
     pub deletion_tx: tokio::sync::mpsc::Sender<String>,
     // mapping docker id to Container
-    _containers: Arc<RwLock<HashMap<String, Container>>>,
+    containers: Arc<RwLock<HashMap<String, Container>>>,
     queue: Queue,
 }
 
@@ -114,7 +114,7 @@ impl ContainerPool {
         });
 
         Self {
-            _containers: containers,
+            containers,
             deletion_tx,
             queue,
         }
@@ -126,5 +126,16 @@ impl ContainerPool {
         self.queue.write().await.push_back(sender);
         CONTAINER_QUEUE_NOTIFY.notify_waiters();
         return receiver;
+    }
+
+    pub async fn shutdown(&self) -> anyhow::Result<()> {
+        use tokio::fs;
+
+        for (id, container) in self.containers.read().await.iter() {
+            fs::remove_dir_all(&container.socket_dir).await?;
+            log::info!("Removed socket dir {}", id);
+        }
+
+        Ok(())
     }
 }

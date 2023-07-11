@@ -81,7 +81,9 @@ async fn main() -> anyhow::Result<()> {
         container_pool: ContainerPool::new(if environment == Environment::Development {
             2
         } else {
-            5
+            // // TESTING VALUE
+            // 2
+            8
         })
         .await,
     }));
@@ -98,8 +100,23 @@ async fn main() -> anyhow::Result<()> {
                 .allow_methods(Any),
         );
 
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        // listen to the stop signal
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install CTRL+C signal handler");
+        log::info!("Shutting down..");
+        // removing all containers
+        if let Err(e) = state_clone.read().await.container_pool.shutdown().await {
+            log::error!("Failed to shutdown container pool: {}", e);
+        }
+        log::info!("Done");
+        std::process::exit(0);
+    });
+
     // run if it is not a production environment
-    if environment == Environment::Development {
+    if environment == Environment::Development || !Config::global().use_https {
         app_without_https_redirect(router.clone(), state.clone()).await;
         return Ok(());
     }

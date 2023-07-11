@@ -34,6 +34,7 @@ pub struct Container {
     /// An event that is fired when the container is stopped
     pub stop_rx: watch::Receiver<()>,
     pub stopped: bool,
+    pub socket_dir: PathBuf,
 
     _id: Uuid,
     deletion_tx: Option<mpsc::Sender<String>>,
@@ -78,6 +79,8 @@ impl Container {
                             "{}:/run/hydra",
                             run_dir.join(&socket_dir).to_string_lossy()
                         )]),
+                        // // TESTING VALUE
+                        // auto_remove: None,
                         auto_remove: Some(true),
                         cpu_quota: Some(Config::global().docker.cpu_shares),
                         cpuset_cpus: Some(Config::global().docker.cpu_set.clone()),
@@ -129,6 +132,7 @@ impl Container {
             deletion_tx,
             commands_tx,
             rpc_records,
+            socket_dir,
             container_rx: Some(container_rx),
             stop,
             stop_rx,
