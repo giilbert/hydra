@@ -81,7 +81,9 @@ async fn main() -> anyhow::Result<()> {
         container_pool: ContainerPool::new(if environment == Environment::Development {
             2
         } else {
-            5
+            // // TESTING VALUE
+            // 2
+            8
         })
         .await,
     }));
@@ -117,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // run if it is not a production environment
-    if environment == Environment::Development {
+    if environment == Environment::Development || !Config::global().use_https {
         app_without_https_redirect(router.clone(), state.clone()).await;
         return Ok(());
     }
