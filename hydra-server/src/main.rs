@@ -13,7 +13,7 @@ use container::Container;
 use execute::execute;
 use pool::ContainerPool;
 use run_request::RunRequest;
-use tokio::sync::RwLock;
+use tokio::{signal::unix::SignalKind, sync::RwLock};
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
 
@@ -97,6 +97,24 @@ async fn main() -> anyhow::Result<()> {
                 .allow_headers(Any)
                 .allow_methods(Any),
         );
+
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        let mut term_signal = tokio::signal::unix::signal(SignalKind::terminate())
+            .expect("failed to install SIGTERM signal handler");
+        // listen to the stop signal
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = term_signal.recv() => {}
+        }
+        log::info!("Shutting down..");
+        // removing all containers
+        if let Err(e) = state_clone.read().await.container_pool.shutdown().await {
+            log::error!("Failed to shutdown container pool: {}", e);
+        }
+        log::info!("Done");
+        std::process::exit(0);
+    });
 
     // run if it is not a production environment
     if environment == Environment::Development {
