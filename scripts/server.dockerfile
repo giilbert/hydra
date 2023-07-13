@@ -29,7 +29,7 @@ RUN --mount=type=cache,target=/usr/src/hydra/target touch hydra-server/src/main.
 # hydra-server
 FROM docker:dind
 USER root
-RUN apk add --no-cache libressl-dev ca-certificates-bundle tini bash
+RUN apk add --no-cache libressl-dev ca-certificates-bundle tini bash ncurses
 COPY --from=builder /bin/hydra-server /bin/hydra-server
 COPY images /images
 COPY ./scripts/server-entrypoint.sh /server-entrypoint.sh
