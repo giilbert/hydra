@@ -23,13 +23,13 @@ echo ""
 
 # ---------- Build ----------
 
+echo ">>> ${C_PURPLE}Building${C_RESET} hydra-container (this will take a while)"
+echo "${C_BLUE}\$${C_RESET} ./scripts/build-container.sh"
+./scripts/build-container.sh
+
 echo ">>> ${C_PURPLE}Building${C_RESET} hydra-server (this will take a while)"
 echo "${C_BLUE}\$${C_RESET} docker build --file ./scripts/server.dockerfile -t hydra-server ."
 docker build --file ./scripts/server.dockerfile -t hydra-server .
-
-echo ">>> ${C_PURPLE}Building${C_RESET} hydra-container (this will also take a while)"
-echo "${C_BLUE}\$${C_RESET} docker build --file ./scripts/container.dockerfile -t hydra-container ."
-docker build --file ./scripts/container.dockerfile -t hydra-container .
 
 # ---------- Goodbye ----------
 

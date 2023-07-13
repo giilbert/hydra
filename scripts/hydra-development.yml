@@ -6,22 +6,22 @@ services:
   hydra-server:
     container_name: "hydra-server"
     image: "hydra-server:latest"
-    volumes:
-      # expose the docker socket for docker API requests
-      - type: bind
-        source: /var/run/docker.sock
-        target: /var/run/docker.sock
-      # this is the directory in which container sockets are created
-      # and are needed by the containers (which are created on the host OS)
-      - type: bind
-        source: /tmp/hydra
-        target: /tmp/hydra
-      - type: bind
-        source: ../test-config/config.toml
-        target: /etc/hydra/config.toml
+    # make it privileged
+    privileged: true
     environment:
       - ENVIRONMENT=development
+      - DOCKER_HOST=tcp://localhost:2376
+      - DOCKER_TLS_CERTDIR=/certs
     tty: true
     ports:
       - "3100:3100"
-    
+    volumes:
+      - docker-certs-ca:/certs/ca
+      - docker-certs-client:/certs/client
+      - type: bind
+        source: ../test-config/config.toml
+        target: /etc/hydra/config.toml
+
+volumes:
+  docker-certs-ca:
+  docker-certs-client:

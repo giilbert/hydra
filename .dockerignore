@@ -1,5 +1,5 @@
 target
 sockets
 .git
-scripts
 nginx
+hydra-web-app

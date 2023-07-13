@@ -1,6 +1,8 @@
-FROM rust:1.70-slim-buster as builder
+FROM rust:1.70-alpine3.18 as builder
 
 WORKDIR /usr/src/hydra
+
+RUN apk add --no-cache musl-dev
 
 ADD Cargo.toml Cargo.toml
 ADD hydra-container/Cargo.toml hydra-container/Cargo.toml
@@ -14,7 +16,10 @@ RUN --mount=type=cache,target=/usr/src/hydra/target mkdir hydra-container/src hy
     && cargo build --release --bin hydra-server \
     && rm -rf hydra-container hydra-server
 
-COPY . .
+COPY protocol protocol
+COPY hydra-server hydra-server
+COPY hydra-container hydra-container
+COPY Cargo.toml Cargo.toml
 
 # update mtime to force rebuild, and then build after building dependencies and caching them
 RUN --mount=type=cache,target=/usr/src/hydra/target touch hydra-server/src/main.rs \
@@ -22,12 +27,14 @@ RUN --mount=type=cache,target=/usr/src/hydra/target touch hydra-server/src/main.
     && mv target/release/hydra-server /bin/hydra-server
 
 # hydra-server
-FROM debian:buster-slim
-RUN apt update \
-    && apt install -y libssl-dev ca-certificates python3 \
-    && rm -rf /var/lib/apt/lists/*
+FROM docker:dind
+USER root
+RUN apk add --no-cache libressl-dev ca-certificates-bundle tini bash
 COPY --from=builder /bin/hydra-server /bin/hydra-server
+COPY images /images
+COPY ./scripts/server-entrypoint.sh /server-entrypoint.sh
 ADD test-certs /etc/hydra/test-certs
 ENV RUST_LOG=info
 WORKDIR /etc/hydra
-CMD ["/bin/hydra-server"]
+RUN chmod +x /server-entrypoint.sh
+CMD ["/server-entrypoint.sh"]
