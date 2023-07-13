@@ -1,6 +1,8 @@
-FROM rust:1.70-buster as builder
+FROM rust:1.70-alpine3.18 as builder
 
 WORKDIR /usr/src/hydra
+
+RUN apk add --no-cache musl-dev
 
 ADD Cargo.toml Cargo.toml
 ADD hydra-container/Cargo.toml hydra-container/Cargo.toml
@@ -22,10 +24,8 @@ RUN --mount=type=cache,target=/usr/src/hydra/target touch hydra-container/src/ma
     && mv target/release/hydra-container /bin/hydra-container
 
 # hydra-container
-FROM debian:buster
-RUN apt update \
-    && apt install -y libssl-dev ca-certificates python3 \
-    && rm -rf /var/lib/apt/lists/*
+FROM alpine:3.18.2
+RUN apk add --no-cache libressl-dev ca-certificates-bundle python3
 COPY --from=builder /bin/hydra-container /bin/hydra-container
 ENV RUST_LOG=info
 ENV ENVIRONMENT=production
