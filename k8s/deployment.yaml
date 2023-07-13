@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: hydra-deployment
+  labels:
+    app: hydra
+    tier: backend
+    environment: development
+    app.kubernetes.io/name: hydra
+    app.kubernetes.io/component: backend
+
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hydra-deployment
+  template:
+    metadata:
+      labels:
+        app: hydra-deployment
+        tier: backend
+    spec:
+      volumes:
+        - name: hydra-run
+          hostPath:
+            path: /run/hydra
+        - name: docker-socket
+          hostPath:
+            path: /var/run/docker.sock
+        - name: hydra-configmap
+          configMap:
+            name: hydra-configmap
+      containers:
+      - name: hydra-application
+        # this image needs to be changed
+        image: hydra-server:latest
+        imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            # this number needs to be adjusted
+            memory: "128Mi"
+            cpu: "500m"
+        ports:
+          - containerPort: 3100
+        securityContext:
+          # allows the container to create docker containers
+          privileged: true
+        volumeMounts:
+          - mountPath: /run/hydra
+            name: hydra-run
+          - mountPath: /var/run/docker.sock
+            name: docker-socket
+          - mountPath: /etc/hydra/config.toml
+            name: hydra-configmap
+            subPath: config.toml
+        env:
+          - name: HYDRA_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: hydra-secret
+                key: HYDRA_API_KEY
+          - name: ENVIRONMENT
+            valueFrom:
+              secretKeyRef:
+                name: hydra-secret
+                key: ENVIRONMENT
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3100
+          initialDelaySeconds: 60
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3100
+          initialDelaySeconds: 60
+
+        
+

@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+
+metadata:
+  name: hydra-ingress
+
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: hydra-local.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hydra-api-service
+            port:
+              number: 80

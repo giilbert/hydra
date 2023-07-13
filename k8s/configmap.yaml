@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hydra-configmap
+data:
+  config.toml: |
+    [docker]
+    # Which CPUs to run containers on
+    cpu_set = "0"
+    # Microseconds of CPU time to give each container per CPU period
+    cpu_shares = 10000
+    # Memory to give each container (lowest 6MB)
+    memory = "8MB"
+
+
