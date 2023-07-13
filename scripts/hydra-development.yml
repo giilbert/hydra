@@ -10,18 +10,11 @@ services:
     privileged: true
     environment:
       - ENVIRONMENT=development
-      - DOCKER_HOST=tcp://localhost:2376
-      - DOCKER_TLS_CERTDIR=/certs
+      - DOCKER_HOST=unix:///var/run/docker.sock
     tty: true
     ports:
       - "3100:3100"
     volumes:
-      - docker-certs-ca:/certs/ca
-      - docker-certs-client:/certs/client
       - type: bind
         source: ../test-config/config.toml
         target: /etc/hydra/config.toml
-
-volumes:
-  docker-certs-ca:
-  docker-certs-client:
