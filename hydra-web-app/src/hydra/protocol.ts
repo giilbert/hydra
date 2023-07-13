@@ -2,7 +2,7 @@ import { TaggedEnum } from "@/types/tagged-enum";
 
 export const getHydraUrl = () => {
   if (process.env.NODE_ENV === "development") {
-    return "http://0.0.0.0:3001";
+    return "http://0.0.0.0:3100";
   }
 
   if (
