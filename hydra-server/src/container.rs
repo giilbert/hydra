@@ -13,7 +13,7 @@ use tokio::{
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
 
-use crate::{config::Config, rpc::RpcRecords, Environment};
+use crate::{config::Config, rpc::RpcRecords, shutdown, Environment};
 
 lazy_static! {
     static ref DOCKER: Docker =
@@ -254,6 +254,8 @@ async fn run_container(
     loop {
         tokio::select! {
             Some(msg) = container_ws_rx.next() => {
+                shutdown::update_last_activity();
+
                 match msg {
                     Ok(Message::Binary(bin)) => {
                         let msg = rmp_serde::from_slice::<ContainerSent>(&bin).expect("rmp_serde deserialize error");
