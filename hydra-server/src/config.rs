@@ -23,14 +23,26 @@ impl Config {
     pub fn load_from_file() -> Self {
         // first check test-config/config.toml
         // then check /etc/hydra/config.toml
+        // then use default config
         let data = if std::fs::metadata("test-config/config.toml").is_ok() {
-            std::fs::read_to_string("test-config/config.toml")
+            Some(std::fs::read_to_string("test-config/config.toml").unwrap())
+        } else if std::fs::metadata("/etc/hydra/config.toml").is_ok() {
+            Some(std::fs::read_to_string("/etc/hydra/config.toml").unwrap())
         } else {
-            std::fs::read_to_string("/etc/hydra/config.toml")
-        }
-        .unwrap();
+            None
+        };
 
-        let config = toml::from_str(&data).expect("error parsing config file");
+        let config = match data {
+            Some(data) => toml::from_str(&data).expect("error parsing config file"),
+            None => Config {
+                use_https: false,
+                docker: DockerConfig {
+                    cpu_set: "0".to_string(),
+                    cpu_shares: 10_000,
+                    memory: 8 * 1000 * 1000,
+                },
+            },
+        };
 
         log::info!("Loaded config: {:?}", config);
 
