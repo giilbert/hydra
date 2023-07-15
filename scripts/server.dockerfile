@@ -37,4 +37,5 @@ ADD test-certs /etc/hydra/test-certs
 ENV RUST_LOG=info
 WORKDIR /etc/hydra
 RUN chmod +x /server-entrypoint.sh
+EXPOSE 3100
 CMD ["/server-entrypoint.sh"]
