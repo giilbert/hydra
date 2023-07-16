@@ -16,10 +16,7 @@ const POLL: u32 = 30; // check every 30 seconds
 static LAST_REQUEST_TIME: AtomicU64 = AtomicU64::new(0);
 
 pub async fn update_last_activity_middleware<B>(req: Request<B>, next: Next<B>) -> Response {
-    let start = std::time::Instant::now();
     update_last_activity();
-    let elapsed = start.elapsed();
-    log::info!("update_last_activity_middleware: {:?}", elapsed);
     next.run(req).await
 }
 
