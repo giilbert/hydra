@@ -16,7 +16,7 @@ impl RpcRecords {
         }
     }
 
-    pub async fn await_response(
+    pub fn await_response(
         &mut self,
         id: Uuid,
     ) -> anyhow::Result<oneshot::Receiver<Result<Value, String>>> {

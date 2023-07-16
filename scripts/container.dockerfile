@@ -27,6 +27,5 @@ RUN --mount=type=cache,target=/usr/src/hydra/target touch hydra-container/src/ma
 FROM alpine:3.18.2
 RUN apk add --no-cache libressl-dev ca-certificates-bundle python3
 COPY --from=builder /bin/hydra-container /bin/hydra-container
-ENV RUST_LOG=info
 ENV ENVIRONMENT=production
 CMD ["/bin/hydra-container"]

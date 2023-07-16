@@ -87,7 +87,7 @@ impl Commands {
                         Ok(r) => r,
                         Err(e) => {
                             log::error!("Failed to handle RPC request: {}", e);
-                            continue;
+                            Err("An internal error occurred".to_string())
                         }
                     };
 

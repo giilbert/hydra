@@ -87,6 +87,7 @@ impl Container {
                         memory: Some(Config::global().docker.memory.try_into()?),
                         ..Default::default()
                     }),
+                    env: Some(vec!["RUST_LOG=hydra_container=debug"]),
                     ..Default::default()
                 },
             )
@@ -162,8 +163,9 @@ impl Container {
             .await?;
 
         log::debug!("[{}]: waiting for RPC response", self.display_id);
+        let await_response = self.rpc_records.lock().await.await_response(id)?;
         let response = tokio::select! {
-            d = self.rpc_records.lock().await.await_response(id).await? => d,
+            d = await_response => d,
             _ = self.stop_rx.changed() => anyhow::bail!("container stopped during RPC")
         };
         let res = response?;

@@ -66,12 +66,21 @@ impl RunRequest {
             container.display_id
         );
 
-        container
+        let result = container
             .rpc(ContainerRpcRequest::SetupFromOptions {
                 files: options.files,
             })
-            .await?
-            .map_err(|_| anyhow::anyhow!("Error setting up container"))?;
+            .await?;
+
+        if let Err(e) = result {
+            container.stop().await?;
+            log::error!(
+                "[tck-{}] failed to setup container: {}",
+                &ticket.to_string()[0..5],
+                e
+            );
+            anyhow::bail!("Failed to setup container")
+        }
 
         Ok(RunRequest {
             ticket,
