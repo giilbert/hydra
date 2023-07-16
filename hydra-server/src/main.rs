@@ -13,6 +13,7 @@ use axum_server::tls_rustls::RustlsConfig;
 use container::Container;
 use execute::execute;
 use pool::ContainerPool;
+use redis::Client;
 use run_request::RunRequest;
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
@@ -33,11 +34,21 @@ mod shutdown;
 
 type AppState = Arc<RwLock<AppStateInner>>;
 
-#[derive(Debug)]
 pub struct AppStateInner {
     pub run_requests: HashMap<Uuid, RunRequest>,
     pub container_pool: ContainerPool,
     pub api_key: String,
+    pub redis: redis::aio::Connection,
+}
+
+impl std::fmt::Debug for AppStateInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppStateInner")
+            .field("run_requests", &self.run_requests)
+            .field("container_pool", &self.container_pool)
+            .field("api_key", &self.api_key)
+            .finish()
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -74,6 +85,9 @@ async fn main() -> anyhow::Result<()> {
     let environment = Environment::get();
     log::info!("Hello! Environment: {:?}", environment);
 
+    let redis_client = Client::open(std::env::var("REDIS_URL")?)?;
+    let redis = redis_client.get_tokio_connection().await?;
+
     let state = AppState::new(RwLock::new(AppStateInner {
         run_requests: Default::default(),
         api_key: std::env::var("HYDRA_API_KEY").unwrap_or_else(|_| {
@@ -88,6 +102,7 @@ async fn main() -> anyhow::Result<()> {
             8
         })
         .await,
+        redis,
     }));
 
     tokio::spawn(shutdown::signal_handler(state.clone()));
