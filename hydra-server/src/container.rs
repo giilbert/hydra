@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use bollard::{container, service::HostConfig, Docker};
 use futures_util::{SinkExt, StreamExt};
@@ -166,6 +166,7 @@ impl Container {
         let await_response = self.rpc_records.lock().await.await_response(id)?;
         let response = tokio::select! {
             d = await_response => d,
+            _ = tokio::time::sleep(Duration::from_secs(10)) => anyhow::bail!("container failed to respond to RPC in 10 seconds"),
             _ = self.stop_rx.changed() => anyhow::bail!("container stopped during RPC")
         };
         let res = response?;
