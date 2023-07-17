@@ -2,10 +2,14 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use protocol::{ContainerRpcRequest, ContainerSent, ExecuteOptions};
+use protocol::{
+    ContainerProxyRequest, ContainerProxyResponse, ContainerRpcRequest, ContainerRpcResponse,
+    ContainerSent, ExecuteOptions,
+};
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::{mpsc, Mutex, RwLock},
+    sync::{mpsc, oneshot, Mutex, RwLock},
     task::JoinHandle,
 };
 use uuid::Uuid;
@@ -28,6 +32,11 @@ pub enum ServerMessage {
     PtyExit { id: u32 },
 }
 
+pub type ProxyPayload = (
+    ContainerProxyRequest,
+    oneshot::Sender<ContainerProxyResponse>,
+);
+
 /// # Where all the magic happens
 ///
 /// ## This struct:
@@ -44,6 +53,8 @@ pub enum ServerMessage {
 pub struct RunRequest {
     pub ticket: Uuid,
     pub display_id: String,
+    pub proxy_requests: mpsc::Sender<ProxyPayload>,
+    proxy_rx: Arc<Mutex<Option<mpsc::Receiver<ProxyPayload>>>>,
     container: Arc<RwLock<Container>>,
     self_destruct_timer: Mutex<Option<JoinHandle<()>>>,
     app_state: AppState,
@@ -55,11 +66,11 @@ impl RunRequest {
         let mut container = {
             let app_state = app_state.read().await;
             let mut recv = app_state.container_pool.take_one().await;
-            recv
-        }
-        .recv()
-        .await
-        .ok_or_else(|| anyhow::anyhow!("No containers available"))?;
+            recv.recv()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("No containers available"))?
+        };
+
         log::info!(
             "[tck-{}] received container {}",
             &ticket.to_string()[0..5],
@@ -82,6 +93,8 @@ impl RunRequest {
             anyhow::bail!("Failed to setup container")
         }
 
+        let (proxy_tx, proxy_rx) = mpsc::channel(32);
+
         Ok(RunRequest {
             ticket,
             display_id: format!(
@@ -89,6 +102,8 @@ impl RunRequest {
                 ticket.to_string()[0..5].to_string(),
                 container.docker_id[0..5].to_string()
             ),
+            proxy_requests: proxy_tx,
+            proxy_rx: Arc::new(Mutex::new(Some(proxy_rx))),
             container: Arc::new(RwLock::new(container)),
             self_destruct_timer: Mutex::new(None),
             app_state,
@@ -103,6 +118,18 @@ impl RunRequest {
 
         *self.self_destruct_timer.lock().await = Some(tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+            let count: u32 = app_state
+                .write()
+                .await
+                .redis
+                .del(format!("run-request-{}", ticket))
+                .await
+                .expect("redis error while deleting run_request");
+
+            if count != 1 {
+                log::error!("error removing run_request from redis: count != 1");
+            }
 
             app_state.write().await.run_requests.remove(&ticket);
             let _ = container.write().await.stop().await;
@@ -132,7 +159,7 @@ impl RunRequest {
             }
         };
 
-        let mut container = self.container.write().await;
+        let container = self.container.read().await;
 
         match data {
             ClientMessage::PtyInput { id, input } => {
@@ -198,6 +225,20 @@ impl RunRequest {
         let mut stop_rx = self.container.read().await.stop_rx.clone();
         self.cancel_self_destruct().await;
 
+        let machine_ip = if std::env::var("FLY_PRIVATE_IP").is_ok() {
+            std::env::var("FLY_PRIVATE_IP").unwrap()
+        } else {
+            "http://localhost:3100".to_string()
+        };
+
+        let _: () = self
+            .app_state
+            .write()
+            .await
+            .redis
+            .set(format!("run-request-{}", self.ticket), machine_ip)
+            .await?;
+
         let this = Arc::new(self);
 
         let (mut messages_tx, mut messages_rx) = mpsc::channel::<Message>(100);
@@ -222,6 +263,36 @@ impl RunRequest {
                         if let Err(err) = Self::handle_container_message(container_message, &mut messages_tx_clone).await {
                             log::error!("[{}] Error handling container message: {}", display_id_clone, err);
                         }
+                    }
+                    _ = stop_rx_clone.changed() => {
+                        break
+                    }
+                }
+            }
+        });
+
+        // this task handles proxy requests
+        let this_clone = this.clone();
+        let mut proxy_rx = this.proxy_rx.lock().await.take().unwrap();
+        let mut stop_rx_clone = stop_rx.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some((req, response_tx)) = proxy_rx.recv() => {
+                        // TODO: handle error
+                        let response = match this_clone
+                            .container
+                            .read()
+                            .await
+                            .proxy_request(req)
+                            .await {
+                                Ok(response) => response,
+                                Err(err) => {
+                                    log::error!("[{}] Error handling proxy request: {}", this_clone.display_id, err);
+                                    continue;
+                                }
+                            };
+                        response_tx.send(response).unwrap();
                     }
                     _ = stop_rx_clone.changed() => {
                         break

@@ -76,6 +76,10 @@ export const HydraProvider: React.FC<{
 
       ws.current.addEventListener("open", () => {
         if (!ws.current) throw new Error("ws.current is null");
+        toast({
+          title: "Web Gateway URL",
+          description: `${data.ticket}--[PORT].localhost:3101`,
+        });
         ws.current.send(
           JSON.stringify({
             type: "Run",

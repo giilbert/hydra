@@ -4,4 +4,4 @@ cpu_set = "0"
 # Microseconds of CPU time to give each container per CPU period
 cpu_shares = 10000
 # Memory to give each container (lowest 6MB)
-memory = "8MB"
+memory = "16MB"

@@ -5,11 +5,14 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 #[derive(Debug)]
-pub struct RpcRecords {
-    pub records: HashMap<Uuid, oneshot::Sender<Result<Value, String>>>,
+pub struct RpcRecords<T: std::fmt::Debug> {
+    pub records: HashMap<Uuid, oneshot::Sender<Result<T, String>>>,
 }
 
-impl RpcRecords {
+impl<T> RpcRecords<T>
+where
+    T: std::fmt::Debug,
+{
     pub fn new() -> Self {
         Self {
             records: HashMap::new(),
@@ -19,18 +22,14 @@ impl RpcRecords {
     pub fn await_response(
         &mut self,
         id: Uuid,
-    ) -> anyhow::Result<oneshot::Receiver<Result<Value, String>>> {
+    ) -> anyhow::Result<oneshot::Receiver<Result<T, String>>> {
         let (tx, rx) = oneshot::channel();
         self.records.insert(id, tx);
 
         Ok(rx)
     }
 
-    pub fn handle_incoming(
-        &mut self,
-        id: Uuid,
-        value: Result<Value, String>,
-    ) -> anyhow::Result<()> {
+    pub fn handle_incoming(&mut self, id: Uuid, value: Result<T, String>) -> anyhow::Result<()> {
         log::debug!("Got RPC response (unsorted): {:?}", value);
 
         if let Some(tx) = self.records.remove(&id) {

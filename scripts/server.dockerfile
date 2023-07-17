@@ -7,18 +7,21 @@ RUN apk add --no-cache musl-dev
 ADD Cargo.toml Cargo.toml
 ADD hydra-container/Cargo.toml hydra-container/Cargo.toml
 ADD hydra-server/Cargo.toml hydra-server/Cargo.toml
+ADD hydra-proxy/Cargo.toml hydra-proxy/Cargo.toml
 ADD protocol protocol
 
-RUN --mount=type=cache,target=/usr/src/hydra/target mkdir hydra-container/src hydra-server/src \
-    && touch hydra-container/src/main.rs hydra-server/src/main.rs \
+RUN --mount=type=cache,target=/usr/src/hydra/target mkdir hydra-container/src hydra-server/src hydra-proxy/src \
+    && touch hydra-container/src/main.rs hydra-server/src/main.rs hydra-proxy/src/main.rs \
     && echo "fn main() {}" > hydra-container/src/main.rs \
     && echo "fn main() {}" > hydra-server/src/main.rs \
+    && echo "fn main() {}" > hydra-proxy/src/main.rs \
     && cargo build --release --bin hydra-server \
-    && rm -rf hydra-container hydra-server
+    && rm -rf hydra-container hydra-server hydra-proxy
 
 COPY protocol protocol
 COPY hydra-server hydra-server
 COPY hydra-container hydra-container
+COPY hydra-proxy hydra-proxy
 COPY Cargo.toml Cargo.toml
 
 # update mtime to force rebuild, and then build after building dependencies and caching them

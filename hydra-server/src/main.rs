@@ -6,15 +6,16 @@ use axum::{
     http::{StatusCode, Uri},
     middleware,
     response::Redirect,
-    routing::{get, post},
+    routing::{any, get, post},
     Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
 use container::Container;
 use execute::execute;
 use pool::ContainerPool;
+use proxy_interface::proxy;
 use redis::Client;
-use run_request::RunRequest;
+use run_request::{ProxyPayload, RunRequest};
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
@@ -28,6 +29,7 @@ mod config;
 mod container;
 mod execute;
 mod pool;
+mod proxy_interface;
 mod rpc;
 mod run_request;
 mod shutdown;
@@ -36,6 +38,7 @@ type AppState = Arc<RwLock<AppStateInner>>;
 
 pub struct AppStateInner {
     pub run_requests: HashMap<Uuid, RunRequest>,
+    pub proxy_requests: HashMap<Uuid, tokio::sync::mpsc::Sender<ProxyPayload>>,
     pub container_pool: ContainerPool,
     pub api_key: String,
     pub redis: redis::aio::Connection,
@@ -90,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState::new(RwLock::new(AppStateInner {
         run_requests: Default::default(),
+        proxy_requests: Default::default(),
         api_key: std::env::var("HYDRA_API_KEY").unwrap_or_else(|_| {
             log::warn!("No API key set. Using `hydra`.");
             "hydra".to_string()
@@ -112,6 +116,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/", get(|| async { "Hydra" }))
         .route("/execute", post(execute).get(execute_websocket))
         .route("/execute-headless", post(execute_headless))
+        .route("/proxy", any(proxy))
         .with_state(state.clone())
         .layer(
             CorsLayer::new()

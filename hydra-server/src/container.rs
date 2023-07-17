@@ -3,7 +3,10 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use bollard::{container, service::HostConfig, Docker};
 use futures_util::{SinkExt, StreamExt};
 use lazy_static::lazy_static;
-use protocol::{ContainerRpcRequest, ContainerSent, ExecuteOptions, HostSent};
+use protocol::{
+    ContainerProxyRequest, ContainerProxyResponse, ContainerRpcRequest, ContainerRpcResponse,
+    ContainerSent, ExecuteOptions, HostSent,
+};
 use serde_json::Value;
 use tokio::{
     fs,
@@ -40,7 +43,9 @@ pub struct Container {
     deletion_tx: Option<mpsc::Sender<String>>,
     commands_tx: mpsc::Sender<ContainerCommands>,
     /// Keeps track of RPC calls and is used for responses
-    rpc_records: Arc<Mutex<RpcRecords>>,
+    rpc_records: Arc<Mutex<RpcRecords<Value>>>,
+    /// Keeps track of proxy requests and is used for responses
+    proxy_records: Arc<Mutex<RpcRecords<ContainerProxyResponse>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -87,7 +92,7 @@ impl Container {
                         memory: Some(Config::global().docker.memory.try_into()?),
                         ..Default::default()
                     }),
-                    env: Some(vec!["RUST_LOG=hydra_container=debug"]),
+                    env: Some(vec!["RUST_LOG=hydra_container=info"]),
                     ..Default::default()
                 },
             )
@@ -112,6 +117,8 @@ impl Container {
         let (commands_tx, commands_rx) = mpsc::channel::<ContainerCommands>(32);
 
         let rpc_records = Arc::new(Mutex::new(RpcRecords::new()));
+        let proxy_records = Arc::new(Mutex::new(RpcRecords::new()));
+
         let (container_tx, container_rx) = mpsc::channel::<ContainerSent>(64);
 
         tokio::task::spawn(run_container(
@@ -119,6 +126,7 @@ impl Container {
             ws_stream,
             commands_rx,
             rpc_records.clone(),
+            proxy_records.clone(),
             container_tx,
             socket_dir.clone(),
             stop.clone(),
@@ -133,6 +141,7 @@ impl Container {
             deletion_tx,
             commands_tx,
             rpc_records,
+            proxy_records,
             socket_dir,
             container_rx: Some(container_rx),
             stop,
@@ -151,7 +160,7 @@ impl Container {
         Ok(())
     }
 
-    pub async fn rpc(&mut self, req: ContainerRpcRequest) -> anyhow::Result<Result<Value, String>> {
+    pub async fn rpc(&self, req: ContainerRpcRequest) -> anyhow::Result<Result<Value, String>> {
         let id = Uuid::new_v4();
 
         log::debug!("[{}]: sent RPC request", self.display_id);
@@ -164,10 +173,11 @@ impl Container {
 
         log::debug!("[{}]: waiting for RPC response", self.display_id);
         let await_response = self.rpc_records.lock().await.await_response(id)?;
+        let mut stop_rx_clone = self.stop_rx.clone();
         let response = tokio::select! {
             d = await_response => d,
             _ = tokio::time::sleep(Duration::from_secs(10)) => anyhow::bail!("container failed to respond to RPC in 10 seconds"),
-            _ = self.stop_rx.changed() => anyhow::bail!("container stopped during RPC")
+            _ = stop_rx_clone.changed() => anyhow::bail!("container stopped during RPC")
         };
         let res = response?;
 
@@ -176,7 +186,7 @@ impl Container {
         Ok(res)
     }
 
-    pub async fn rpc_setup_from_options(&mut self, options: ExecuteOptions) -> anyhow::Result<()> {
+    pub async fn rpc_setup_from_options(&self, options: ExecuteOptions) -> anyhow::Result<()> {
         self.rpc(ContainerRpcRequest::SetupFromOptions {
             files: options.files,
         })
@@ -187,7 +197,7 @@ impl Container {
     }
 
     pub async fn rpc_pty_create(
-        &mut self,
+        &self,
         command: String,
         arguments: Vec<String>,
     ) -> anyhow::Result<u64> {
@@ -201,12 +211,40 @@ impl Container {
             .ok_or_else(|| anyhow::anyhow!("invalid pty id"))?)
     }
 
-    pub async fn rpc_pty_input(&mut self, pty_id: u32, input: String) -> anyhow::Result<()> {
+    pub async fn rpc_pty_input(&self, pty_id: u32, input: String) -> anyhow::Result<()> {
         self.rpc(ContainerRpcRequest::PtyInput { id: pty_id, input })
             .await?
             .map_err(|e| anyhow::anyhow!("error inputting: {:?}", e))?;
 
         Ok(())
+    }
+
+    pub async fn proxy_request(
+        &self,
+        req: ContainerProxyRequest,
+    ) -> anyhow::Result<ContainerProxyResponse> {
+        let id = Uuid::new_v4();
+
+        log::debug!("[{}]: sent proxy request", self.display_id);
+        self.commands_tx
+            .send(ContainerCommands::SendMessage(HostSent::ProxyRequest(
+                id, req,
+            )))
+            .await?;
+
+        log::debug!("[{}]: waiting for proxy response", self.display_id);
+        let await_response = self.proxy_records.lock().await.await_response(id)?;
+        let mut stop_rx_clone = self.stop_rx.clone();
+        let response = tokio::select! {
+            d = await_response => d,
+            _ = tokio::time::sleep(Duration::from_secs(10)) => anyhow::bail!("container failed to respond to RPC in 10 seconds"),
+            _ = stop_rx_clone.changed() => anyhow::bail!("container stopped during RPC")
+        };
+        let res = response?;
+
+        log::debug!("[{}]: got proxy response", self.display_id);
+
+        res.map_err(|e| anyhow::anyhow!("container failed to proxy: {:?}", e))
     }
 }
 
@@ -214,7 +252,8 @@ async fn run_container(
     container_id: String,
     ws_stream: WebSocketStream<UnixStream>,
     mut commands_rx: mpsc::Receiver<ContainerCommands>,
-    rpc_records: Arc<Mutex<RpcRecords>>,
+    rpc_records: Arc<Mutex<RpcRecords<Value>>>,
+    proxy_records: Arc<Mutex<RpcRecords<ContainerProxyResponse>>>,
     container_tx: mpsc::Sender<ContainerSent>,
     socket_dir: PathBuf,
     stop: Arc<watch::Sender<()>>,
@@ -247,9 +286,9 @@ async fn run_container(
                         &msg.to_string().trim_end()
                     );
                 }
-                _ = stop_rx.changed() => {
-                    break;
-                }
+                // _ = stop_rx.changed() => {
+                //     break;
+                // }
             }
         }
     });
@@ -276,6 +315,14 @@ async fn run_container(
                                 log::debug!("Handling rpc response");
                                 if let Err(err) = rpc_records.handle_incoming(id, response) {
                                     log::error!("[{logging_id}] Error handling rpc response: {err:#?}");
+                                };
+                            },
+                            ContainerSent::ProxyResponse { req_id, response } => {
+                                // log::debug!("Got rpc response: {:#?}", response);
+                                let mut proxy_records = proxy_records.lock().await;
+                                // log::debug!("Handling proxy response");
+                                if let Err(err) = proxy_records.handle_incoming(req_id, response) {
+                                    log::error!("[{logging_id}] Error handling proxy response: {err:#?}");
                                 };
                             },
                             _ => container_tx.send(msg).await?,

@@ -1,0 +1,20 @@
+[package]
+name = "hydra-proxy"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.69"
+axum = { version = "0.6.18", features = ["ws", "macros"] }
+dotenv = "0.15.0"
+futures-util = "0.3.26"
+log = "0.4.17"
+tokio = { version = "1.28.1", features = ["full"] }
+parking_lot = "0.12.1"
+tower-http = { version = "0.3.5", features = ["cors"] }
+pretty_env_logger = "0.4.0"
+redis = { version = "0.23.0", features = ["tokio", "tokio-comp"] }
+tower = "0.4.13"
+reqwest = "0.11.18"

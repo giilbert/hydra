@@ -154,16 +154,21 @@ pub async fn execute_websocket(
     Query(request): Query<ExecuteWebsocketRequest>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, &'static str> {
-    app_state
-        .write()
-        .await
-        .run_requests
-        .remove(&request.ticket)
-        .map_or(Err("No such ticket"), |run_request| {
-            Ok(ws.on_upgrade(move |ws| async {
-                if let Err(err) = run_request.handle_websocket_connection(ws).await {
-                    log::error!("Error handling WebSocket connection: {:?}", err);
-                }
-            }))
-        })
+    let run_request = app_state.write().await.run_requests.remove(&request.ticket);
+
+    run_request.map_or(Err("No such ticket"), |run_request| {
+        Ok(ws.on_upgrade(move |ws| async move {
+            let ticket = run_request.ticket.clone();
+            app_state.write().await.proxy_requests.insert(
+                run_request.ticket.clone(),
+                run_request.proxy_requests.clone(),
+            );
+
+            if let Err(err) = run_request.handle_websocket_connection(ws).await {
+                log::error!("Error handling WebSocket connection: {:?}", err);
+            }
+
+            app_state.write().await.proxy_requests.remove(&ticket);
+        }))
+    })
 }
