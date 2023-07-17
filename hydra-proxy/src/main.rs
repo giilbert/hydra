@@ -2,6 +2,8 @@ use axum::handler::HandlerWithoutStateExt;
 use std::net::SocketAddr;
 
 mod handler;
+mod websocket;
+
 use crate::handler::handler;
 
 #[tokio::main]

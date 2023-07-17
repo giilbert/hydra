@@ -1,15 +1,32 @@
 use axum::{
     async_trait,
     body::Bytes,
-    extract::{FromRequestParts, Host},
+    extract::{FromRequestParts, Host, WebSocketUpgrade},
     http::{request::Parts, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     response::IntoResponse,
 };
-use reqwest::Response;
+use hyper::{header, upgrade::OnUpgrade};
+use sha1::{Digest, Sha1};
+use tokio_tungstenite::{
+    tungstenite::protocol::{Role, WebSocketConfig},
+    WebSocketStream,
+};
+
+use crate::websocket::accept_websocket_connection;
+
+fn sign(key: &[u8]) -> HeaderValue {
+    use base64::engine::Engine as _;
+
+    let mut sha1 = Sha1::default();
+    sha1.update(key);
+    sha1.update(&b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"[..]);
+    let b64 = Bytes::from(base64::engine::general_purpose::STANDARD.encode(sha1.finalize()));
+    HeaderValue::from_maybe_shared(b64).expect("base64 is a valid value")
+}
 
 #[axum::debug_handler]
 pub async fn handler(
-    ExtractMethod(method): ExtractMethod,
+    mut custom_extract: CustomExtract,
     uri: Uri,
     Host(host): Host,
     mut headers: HeaderMap,
@@ -20,10 +37,6 @@ pub async fn handler(
         .map(|v| v == "websocket")
         .unwrap_or(false);
 
-    if is_websocket_upgrade {
-        unimplemented!("websocket proxying is not yet implemented");
-    }
-
     let hydra_server_url = "http://localhost:3100";
     let proxy_url = format!("{hydra_server_url}/proxy");
 
@@ -32,9 +45,59 @@ pub async fn handler(
         HeaderValue::from_str(&uri.to_string()).map_err(|_| StatusCode::BAD_REQUEST)?,
     );
 
+    if is_websocket_upgrade {
+        // TODO: handle errors
+        if custom_extract.method != Method::GET {
+            panic!("method not a get");
+        }
+
+        let sec_websocket_key = headers.get(header::SEC_WEBSOCKET_KEY).unwrap().clone();
+        let on_upgrade = custom_extract.on_upgrade.take().unwrap();
+
+        let config = WebSocketConfig {
+            ..Default::default()
+        };
+
+        tokio::spawn(async move {
+            let upgraded = match on_upgrade.await {
+                Ok(upgraded) => upgraded,
+                Err(err) => {
+                    log::error!("WebSocket upgrade error: {err}");
+                    return;
+                }
+            };
+
+            accept_websocket_connection(
+                WebSocketStream::from_raw_socket(upgraded, Role::Server, Some(config)).await,
+            )
+            .await;
+        });
+
+        const UPGRADE: HeaderValue = HeaderValue::from_static("upgrade");
+        const WEBSOCKET: HeaderValue = HeaderValue::from_static("websocket");
+
+        let mut response_headers = HeaderMap::new();
+        response_headers.insert(header::CONNECTION, UPGRADE);
+        response_headers.insert(header::UPGRADE, WEBSOCKET);
+        response_headers.insert(
+            header::SEC_WEBSOCKET_ACCEPT,
+            sign(sec_websocket_key.as_bytes()),
+        );
+        response_headers.insert(
+            "X-Forwarded-By",
+            HeaderValue::from_str("hydra-proxy").unwrap(),
+        );
+
+        return Ok((
+            StatusCode::SWITCHING_PROTOCOLS,
+            response_headers,
+            Bytes::new(),
+        ));
+    }
+
     let client = reqwest::Client::new();
     let request = client
-        .request(method, proxy_url)
+        .request(custom_extract.method, proxy_url)
         .headers(headers)
         .body(body)
         .build()
@@ -61,13 +124,21 @@ pub async fn handler(
     Ok((status_code, response_headers, response_bytes))
 }
 
-pub struct ExtractMethod(pub Method);
+pub struct CustomExtract {
+    pub method: Method,
+    pub on_upgrade: Option<OnUpgrade>,
+}
 
 #[async_trait]
-impl<S> FromRequestParts<S> for ExtractMethod {
+impl<S> FromRequestParts<S> for CustomExtract {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        Ok(ExtractMethod(parts.method.clone()))
+        let on_upgrade = parts.extensions.remove::<OnUpgrade>();
+
+        Ok(CustomExtract {
+            method: parts.method.clone(),
+            on_upgrade,
+        })
     }
 }
