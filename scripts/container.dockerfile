@@ -3,7 +3,7 @@ FROM rust:1.70-slim-buster as builder
 WORKDIR /usr/src/hydra
 
 RUN apt-get update \
-    && apt-get install -y libssl-dev \
+    && apt-get install -y pkg-config libssl-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

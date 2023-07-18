@@ -406,7 +406,7 @@ impl Container {
         }
 
         log::info!("[{logging_id}]: broadcasting stop");
-        stop.send(()).expect("stop send error");
+        let _ = stop.send(());
 
         let mut ws_stream = container_ws_tx
             .reunite(container_ws_rx)
