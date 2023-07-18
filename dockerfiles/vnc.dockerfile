@@ -15,4 +15,5 @@ RUN install -d -m 1777 /tmp/.X11-unix
 COPY entrypoint.sh /
 
 EXPOSE 6080
+ENV DISPLAY=:0.0
 ENTRYPOINT ["sh", "/entrypoint.sh"]
