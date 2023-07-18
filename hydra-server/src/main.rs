@@ -1,5 +1,16 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+mod config;
+mod container;
+mod execute;
+mod pool;
+mod proxy_interface;
+mod rpc;
+mod run_request;
+mod shutdown;
 
+use crate::{
+    config::{Config, Environment},
+    execute::{execute_headless, execute_websocket},
+};
 use axum::{
     extract::Host,
     handler::HandlerWithoutStateExt,
@@ -16,23 +27,10 @@ use pool::ContainerPool;
 use proxy_interface::proxy;
 use redis::Client;
 use run_request::{ProxyPayload, RunRequest};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
-
-use crate::{
-    config::Config,
-    execute::{execute_headless, execute_websocket},
-};
-
-mod config;
-mod container;
-mod execute;
-mod pool;
-mod proxy_interface;
-mod rpc;
-mod run_request;
-mod shutdown;
 
 type AppState = Arc<RwLock<AppStateInner>>;
 
@@ -54,25 +52,6 @@ impl std::fmt::Debug for AppStateInner {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
-enum Environment {
-    Development,
-    Production,
-}
-
-impl Environment {
-    pub fn get() -> Self {
-        match std::env::var("ENVIRONMENT")
-            .unwrap_or("development".to_string())
-            .as_str()
-        {
-            "production" => Environment::Production,
-            "development" => Environment::Development,
-            _ => panic!("invalid environment"),
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 struct Ports {
     http: u16,
@@ -88,8 +67,17 @@ async fn main() -> anyhow::Result<()> {
     let environment = Environment::get();
     log::info!("Hello! Environment: {:?}", environment);
 
-    let redis_client = Client::open(std::env::var("REDIS_URL")?)?;
-    let redis = redis_client.get_tokio_connection().await?;
+    let redis_client = Client::open(
+        std::env::var("REDIS_URL")
+            .expect("REDIS_URL should be set in .env")
+            .as_str(),
+    )
+    .expect("unable to create redis client");
+
+    let redis = redis_client
+        .get_tokio_connection()
+        .await
+        .expect("unable to create connection");
 
     let state = AppState::new(RwLock::new(AppStateInner {
         run_requests: Default::default(),
@@ -147,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
     axum_server::bind_rustls(addr, config)
         .serve(router.with_state(state).into_make_service())
         .await
-        .unwrap();
+        .expect("unable to bind to port");
 
     Ok(())
 }
@@ -159,16 +147,24 @@ async fn create_rustls_config() -> RustlsConfig {
 
     let (cert_pem, key_pem) = if fs::try_exists("certs").await.unwrap_or(false) {
         (
-            fs::read("certs/cert.pem").await.unwrap(),
-            fs::read("certs/key.pem").await.unwrap(),
+            fs::read("certs/cert.pem")
+                .await
+                .expect("error reading cert.pem"),
+            fs::read("certs/key.pem")
+                .await
+                .expect("error reading key.pem"),
         )
     } else {
         log::warn!(
             "Using default test SSL certificates, this is insecure and will definitely not work."
         );
         (
-            fs::read("test-certs/cert.pem").await.unwrap(),
-            fs::read("test-certs/key.pem").await.unwrap(),
+            fs::read("test-certs/cert.pem")
+                .await
+                .expect("error reading cert.pem"),
+            fs::read("test-certs/key.pem")
+                .await
+                .expect("error reading key.pem"),
         )
     };
 
@@ -206,7 +202,7 @@ async fn redirect_http_to_https(ports: Ports) {
     axum::Server::bind(&addr.into())
         .serve(redirect.into_make_service())
         .await
-        .unwrap();
+        .expect("unable to bind to port");
 }
 
 async fn app_without_https_redirect(router: Router<AppState>, state: AppState) {
@@ -215,5 +211,5 @@ async fn app_without_https_redirect(router: Router<AppState>, state: AppState) {
     axum::Server::bind(&addr.into())
         .serve(router.with_state(state).into_make_service())
         .await
-        .unwrap();
+        .expect("unable to bind to port");
 }

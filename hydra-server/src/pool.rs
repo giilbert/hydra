@@ -1,3 +1,4 @@
+use crate::Container;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -5,10 +6,7 @@ use std::{
         Arc,
     },
 };
-
 use tokio::sync::{mpsc, Notify, RwLock};
-
-use crate::Container;
 
 type Queue = Arc<RwLock<VecDeque<mpsc::Sender<Container>>>>;
 

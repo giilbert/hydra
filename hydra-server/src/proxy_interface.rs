@@ -1,5 +1,4 @@
-use std::str::FromStr;
-
+use crate::AppState;
 use axum::{
     async_trait,
     body::Bytes,
@@ -8,10 +7,9 @@ use axum::{
     response::IntoResponse,
 };
 use protocol::ContainerProxyRequest;
+use std::str::FromStr;
 use tokio::sync::oneshot;
 use uuid::Uuid;
-
-use crate::AppState;
 
 #[axum::debug_handler]
 pub async fn proxy(

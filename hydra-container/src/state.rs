@@ -1,16 +1,14 @@
+use crate::{commands::Command, pty::PtyCommands};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::atomic::{AtomicU32, Ordering},
 };
-
 use tokio::sync::mpsc;
-
-use crate::{commands::Command, pty::PtyCommands};
 
 static PTY_ID: AtomicU32 = AtomicU32::new(0);
 
 pub struct State {
-    commands: mpsc::Sender<Command>,
+    pub commands: mpsc::Sender<Command>,
     ptys: HashMap<u32, mpsc::Sender<PtyCommands>>,
 }
 

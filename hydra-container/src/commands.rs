@@ -1,27 +1,19 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
-
+use crate::{procedures::handle_rpc_procedure, state::State};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
 use protocol::{ContainerProxyRequest, ContainerProxyResponse, ContainerSent, HostSent};
-
 use reqwest::{
     header::{HeaderMap, HeaderName},
     Method,
 };
+use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
-    fs,
     net::UnixStream,
     sync::{mpsc, Mutex},
 };
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
-
-use crate::{
-    procedures::handle_rpc_procedure,
-    pty::{Pty, PtyCommands},
-    state::State,
-};
 
 #[derive(Debug)]
 pub enum Command {

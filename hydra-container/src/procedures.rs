@@ -1,14 +1,12 @@
-use std::{path::PathBuf, sync::Arc};
-
+use crate::{commands::Command, pty, state::State};
 use portable_pty::CommandBuilder;
 use protocol::ContainerRpcRequest;
 use serde_json::{json, Value};
+use std::{path::PathBuf, sync::Arc};
 use tokio::{
     fs,
     sync::{mpsc, Mutex},
 };
-
-use crate::{commands::Command, pty, state::State};
 
 pub async fn handle_rpc_procedure(
     commands: &mpsc::Sender<Command>,

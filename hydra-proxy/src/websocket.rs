@@ -2,7 +2,7 @@ use futures_util::{SinkExt, StreamExt};
 use hyper::upgrade::Upgraded;
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
-pub async fn accept_websocket_connection(mut ws: WebSocketStream<Upgraded>) {
+pub async fn accept_websocket_connection(ws: WebSocketStream<Upgraded>) {
     let (mut tx, rx) = ws.split();
 
     log::info!("accepted websocket connection");

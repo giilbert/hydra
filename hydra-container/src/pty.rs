@@ -1,26 +1,20 @@
+use crate::commands::Command;
 use futures_util::{Stream, StreamExt};
+use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use protocol::ContainerSent;
 use std::{
     io::{Read, Write},
     ops::{Deref, DerefMut},
     pin::Pin,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc,
-    },
-    task::{Context, Poll},
+    sync::atomic::{AtomicU32, Ordering},
 };
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
-
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-
-use crate::commands::Command;
 
 #[derive(Clone, Debug)]
 pub enum PtyInput {
     Text(String),
-    Resize(u16, u16),
+    // Resize(u16, u16),
 }
 
 pub struct PtyStream {
@@ -74,27 +68,32 @@ impl DerefMut for PtyStream {
 
 pub struct PtySink {
     write: Box<dyn Write + Send>,
-    master: Box<dyn MasterPty + Send>,
+    // master: Box<dyn MasterPty + Send>,
 }
 
 impl PtySink {
-    fn new(write: Box<dyn Write + Send>, master: Box<dyn MasterPty + Send>) -> Self {
-        Self { write, master }
+    fn new(
+        write: Box<dyn Write + Send>,
+        // master: Box<dyn MasterPty + Send>
+    ) -> Self {
+        Self {
+            write,
+            // master
+        }
     }
 
     pub fn input(&mut self, input: PtyInput) -> anyhow::Result<()> {
         match input {
             PtyInput::Text(s) => {
                 self.write.write_all(s.as_bytes())?;
-            }
-            PtyInput::Resize(cols, rows) => {
-                self.master.resize(PtySize {
-                    rows,
-                    cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                })?;
-            }
+            } // PtyInput::Resize(cols, rows) => {
+              //     self.master.resize(PtySize {
+              //         rows,
+              //         cols,
+              //         pixel_width: 0,
+              //         pixel_height: 0,
+              //     })?;
+              // }
         }
 
         Ok(())
@@ -115,7 +114,10 @@ fn create_raw(
     let writer = pair.master.try_clone_writer()?;
 
     let stream = PtyStream::new(reader);
-    let sink = PtySink::new(writer, pair.master);
+    let sink = PtySink::new(
+        writer,
+        // pair.master
+    );
 
     Ok((sink, stream, child))
 }

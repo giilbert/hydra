@@ -1,12 +1,10 @@
+use crate::AppState;
+use axum::{http::Request, middleware::Next, response::Response};
 use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::UNIX_EPOCH,
 };
-
-use axum::{http::Request, middleware::Next, response::Response};
 use tokio::{signal::unix::SignalKind, time};
-
-use crate::AppState;
 
 // puts the server to sleep (shuts down) after 5 minutes of inactivity.
 const TIME: u64 = 5 * 60; // 5 minutes

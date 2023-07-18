@@ -1,6 +1,5 @@
-use std::sync::OnceLock;
-
 use serde::Deserialize;
+use std::sync::OnceLock;
 
 static GLOBAL_CONFIG: OnceLock<Config> = OnceLock::new();
 
@@ -54,5 +53,24 @@ impl Config {
             let config = Config::load_from_file();
             config
         })
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum Environment {
+    Development,
+    Production,
+}
+
+impl Environment {
+    pub fn get() -> Self {
+        match std::env::var("ENVIRONMENT")
+            .unwrap_or("development".to_string())
+            .as_str()
+        {
+            "production" => Environment::Production,
+            "development" => Environment::Development,
+            _ => panic!("invalid environment"),
+        }
     }
 }

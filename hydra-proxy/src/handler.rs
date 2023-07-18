@@ -1,7 +1,8 @@
+use crate::websocket::accept_websocket_connection;
 use axum::{
     async_trait,
     body::Bytes,
-    extract::{FromRequestParts, Host, WebSocketUpgrade},
+    extract::FromRequestParts,
     http::{request::Parts, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     response::IntoResponse,
 };
@@ -11,8 +12,6 @@ use tokio_tungstenite::{
     tungstenite::protocol::{Role, WebSocketConfig},
     WebSocketStream,
 };
-
-use crate::websocket::accept_websocket_connection;
 
 fn sign(key: &[u8]) -> HeaderValue {
     use base64::engine::Engine as _;
@@ -28,7 +27,7 @@ fn sign(key: &[u8]) -> HeaderValue {
 pub async fn handler(
     mut custom_extract: CustomExtract,
     uri: Uri,
-    Host(host): Host,
+    // Host(host): Host,
     mut headers: HeaderMap,
     body: Bytes,
 ) -> Result<impl IntoResponse, StatusCode> {

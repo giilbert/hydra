@@ -1,20 +1,18 @@
-use std::sync::Arc;
-
+use crate::{container::Container, AppState};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use protocol::{
-    ContainerProxyRequest, ContainerProxyResponse, ContainerRpcRequest, ContainerRpcResponse,
-    ContainerSent, ExecuteOptions,
+    ContainerProxyRequest, ContainerProxyResponse, ContainerRpcRequest, ContainerSent,
+    ExecuteOptions,
 };
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tokio::{
     sync::{mpsc, oneshot, Mutex, RwLock},
     task::JoinHandle,
 };
 use uuid::Uuid;
-
-use crate::{container::Container, AppState};
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", content = "data")]

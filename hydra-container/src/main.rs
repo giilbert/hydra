@@ -3,10 +3,9 @@ mod procedures;
 mod pty;
 mod state;
 
+use crate::commands::Commands;
 use tokio::net::UnixStream;
 use tokio_tungstenite::client_async;
-
-use crate::commands::Commands;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
