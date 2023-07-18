@@ -4,7 +4,7 @@ mod execute;
 mod pool;
 mod proxy_interface;
 mod rpc;
-mod run_request;
+mod session;
 mod shutdown;
 
 use crate::{
@@ -26,7 +26,7 @@ use execute::execute;
 use pool::ContainerPool;
 use proxy_interface::proxy;
 use redis::Client;
-use run_request::{ProxyPayload, RunRequest};
+use session::{ProxyPayload, Session};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
@@ -35,7 +35,7 @@ use uuid::Uuid;
 type AppState = Arc<RwLock<AppStateInner>>;
 
 pub struct AppStateInner {
-    pub run_requests: HashMap<Uuid, RunRequest>,
+    pub sessions: HashMap<Uuid, Session>,
     pub proxy_requests: HashMap<Uuid, tokio::sync::mpsc::Sender<ProxyPayload>>,
     pub container_pool: ContainerPool,
     pub api_key: String,
@@ -45,10 +45,10 @@ pub struct AppStateInner {
 impl std::fmt::Debug for AppStateInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppStateInner")
-            .field("run_requests", &self.run_requests)
+            .field("sessions", &self.sessions)
             .field("container_pool", &self.container_pool)
             .field("api_key", &self.api_key)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -80,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
         .expect("unable to create connection");
 
     let state = AppState::new(RwLock::new(AppStateInner {
-        run_requests: Default::default(),
+        sessions: Default::default(),
         proxy_requests: Default::default(),
         api_key: std::env::var("HYDRA_API_KEY").unwrap_or_else(|_| {
             log::warn!("No API key set. Using `hydra`.");

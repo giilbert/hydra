@@ -48,7 +48,7 @@ pub type ProxyPayload = (
 /// - Make sure everything is cleaned up when the container crashes
 /// - Handle messages DIRECTLY from the container
 #[derive(Debug)]
-pub struct RunRequest {
+pub struct Session {
     pub ticket: Uuid,
     pub display_id: String,
     pub proxy_requests: mpsc::Sender<ProxyPayload>,
@@ -58,7 +58,7 @@ pub struct RunRequest {
     app_state: AppState,
 }
 
-impl RunRequest {
+impl Session {
     pub async fn new(options: ExecuteOptions, app_state: AppState) -> anyhow::Result<Self> {
         let ticket = Uuid::new_v4();
         let mut container = {
@@ -93,7 +93,7 @@ impl RunRequest {
 
         let (proxy_tx, proxy_rx) = mpsc::channel(32);
 
-        Ok(RunRequest {
+        Ok(Session {
             ticket,
             display_id: format!(
                 "tck-{}, dok-{}",
@@ -121,15 +121,15 @@ impl RunRequest {
                 .write()
                 .await
                 .redis
-                .del(format!("run-request-{}", ticket))
+                .del(format!("session-{}", ticket))
                 .await
-                .expect("redis error while deleting run_request");
+                .expect("redis error while deleting session");
 
             if count != 1 {
-                log::error!("error removing run_request from redis: count != 1");
+                log::error!("error removing session from redis: count != 1");
             }
 
-            app_state.write().await.run_requests.remove(&ticket);
+            app_state.write().await.sessions.remove(&ticket);
             let _ = container.write().await.stop().await;
             log::info!(
                 "[dok-{}]: cleaned - prime_self_destruct",
@@ -234,7 +234,7 @@ impl RunRequest {
             .write()
             .await
             .redis
-            .set(format!("run-request-{}", self.ticket), machine_ip)
+            .set(format!("session-{}", self.ticket), machine_ip)
             .await?;
 
         let this = Arc::new(self);

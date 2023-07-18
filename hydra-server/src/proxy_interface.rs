@@ -22,7 +22,7 @@ pub async fn proxy(
     let subdomain = host.split('.').next().ok_or(StatusCode::BAD_REQUEST)?;
     let parts = subdomain.split("--").collect::<Vec<_>>();
 
-    let run_request_id: Uuid = parts
+    let session_id: Uuid = parts
         .get(0)
         .ok_or(StatusCode::BAD_REQUEST)?
         .parse()
@@ -42,7 +42,7 @@ pub async fn proxy(
         .read()
         .await
         .proxy_requests
-        .get(&run_request_id.into())
+        .get(&session_id.into())
         .ok_or(StatusCode::BAD_REQUEST)?
         .clone();
 
