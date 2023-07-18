@@ -19,6 +19,11 @@ image = "registry.fly.io/hydra-server"
     handlers = ["http"]
     port = "80"
 
+[services.concurrency]
+type = "connections"
+hard_limit = 8
+soft_limit = 6
+
 # [[services.http_checks]]
 #     interval = 10000
 #     grace_period = "60s"
