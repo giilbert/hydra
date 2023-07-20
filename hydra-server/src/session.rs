@@ -62,7 +62,6 @@ impl Session {
     pub async fn new(options: ExecuteOptions, app_state: AppState) -> anyhow::Result<Self> {
         let ticket = Uuid::new_v4();
         let mut container = {
-            let app_state = app_state.read().await;
             let mut recv = app_state.container_pool.take_one().await;
             recv.recv()
                 .await
@@ -118,9 +117,9 @@ impl Session {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
             let count: u32 = app_state
+                .redis
                 .write()
                 .await
-                .redis
                 .del(format!("session-{}", ticket))
                 .await
                 .expect("redis error while deleting session");
@@ -129,7 +128,7 @@ impl Session {
                 log::error!("error removing session from redis: count != 1");
             }
 
-            app_state.write().await.sessions.remove(&ticket);
+            app_state.sessions.write().await.remove(&ticket);
             let _ = container.write().await.stop().await;
             log::info!(
                 "[dok-{}]: cleaned - prime_self_destruct",
@@ -231,9 +230,9 @@ impl Session {
 
         let _: () = self
             .app_state
+            .redis
             .write()
             .await
-            .redis
             .set(format!("session-{}", self.ticket), machine_ip)
             .await?;
 

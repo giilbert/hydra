@@ -1,3 +1,4 @@
+mod app_state;
 mod config;
 mod container;
 mod execute;
@@ -8,6 +9,7 @@ mod session;
 mod shutdown;
 
 use crate::{
+    app_state::AppState,
     config::{Config, Environment},
     execute::{execute_headless, execute_websocket},
 };
@@ -23,34 +25,9 @@ use axum::{
 use axum_server::tls_rustls::RustlsConfig;
 use container::Container;
 use execute::execute;
-use pool::ContainerPool;
 use proxy_interface::proxy;
-use redis::Client;
-use session::{ProxyPayload, Session};
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-use tokio::sync::RwLock;
+use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
-use uuid::Uuid;
-
-type AppState = Arc<RwLock<AppStateInner>>;
-
-pub struct AppStateInner {
-    pub sessions: HashMap<Uuid, Session>,
-    pub proxy_requests: HashMap<Uuid, tokio::sync::mpsc::Sender<ProxyPayload>>,
-    pub container_pool: ContainerPool,
-    pub api_key: String,
-    pub redis: redis::aio::Connection,
-}
-
-impl std::fmt::Debug for AppStateInner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AppStateInner")
-            .field("sessions", &self.sessions)
-            .field("container_pool", &self.container_pool)
-            .field("api_key", &self.api_key)
-            .finish_non_exhaustive()
-    }
-}
 
 #[derive(Clone, Copy)]
 struct Ports {
@@ -67,35 +44,7 @@ async fn main() -> anyhow::Result<()> {
     let environment = Environment::get();
     log::info!("Hello! Environment: {:?}", environment);
 
-    let redis_client = Client::open(
-        std::env::var("REDIS_URL")
-            .expect("REDIS_URL should be set in .env")
-            .as_str(),
-    )
-    .expect("unable to create redis client");
-
-    let redis = redis_client
-        .get_tokio_connection()
-        .await
-        .expect("unable to create connection");
-
-    let state = AppState::new(RwLock::new(AppStateInner {
-        sessions: Default::default(),
-        proxy_requests: Default::default(),
-        api_key: std::env::var("HYDRA_API_KEY").unwrap_or_else(|_| {
-            log::warn!("No API key set. Using `hydra`.");
-            "hydra".to_string()
-        }),
-        container_pool: ContainerPool::new(if environment == Environment::Development {
-            2
-        } else {
-            // // TESTING VALUE
-            // 2
-            8
-        })
-        .await,
-        redis,
-    }));
+    let state = AppState::create_with_defaults(environment).await;
 
     tokio::spawn(shutdown::signal_handler(state.clone()));
     tokio::spawn(shutdown::run_check_test(state.clone()));

@@ -29,9 +29,9 @@ pub async fn proxy(
         .map_err(|_| ErrorResponse::bad_request("X-Hydra-URI is an invalid string"))?;
 
     let proxy_requests = app_state
+        .proxy_requests
         .read()
         .await
-        .proxy_requests
         .get(&session_id.into())
         .ok_or_else(|| ErrorResponse::not_found("Container not found"))?
         .clone();

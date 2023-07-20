@@ -26,7 +26,7 @@ pub async fn execute(
     Query(params): Query<ExecuteQueryParams>,
     Json(options): Json<ExecuteOptions>,
 ) -> Result<Json<ExecuteResponse>, ErrorResponse> {
-    if params.api_key != app_state.read().await.api_key {
+    if params.api_key != app_state.api_key {
         return ErrorResponse::unauthorized("Invalid API key").into();
     }
 
@@ -41,9 +41,9 @@ pub async fn execute(
     session.prime_self_destruct().await;
 
     app_state
+        .sessions
         .write()
         .await
-        .sessions
         .insert(session.ticket, session);
 
     Ok(Json(ExecuteResponse {
@@ -68,11 +68,11 @@ pub async fn execute_headless(
     Query(params): Query<ExecuteQueryParams>,
     Json(options): Json<ExecuteHeadlessRequest>,
 ) -> Result<Json<ExecuteHeadlessReponse>, ErrorResponse> {
-    if params.api_key != app_state.read().await.api_key {
+    if params.api_key != app_state.api_key {
         return ErrorResponse::unauthorized("Invalid API key").into();
     }
 
-    let mut container_req = app_state.read().await.container_pool.take_one().await;
+    let mut container_req = app_state.container_pool.take_one().await;
     let mut container = container_req
         .recv()
         .await
@@ -155,24 +155,24 @@ pub async fn execute_websocket(
     ws: WebSocketUpgrade,
 ) -> Result<Response, ErrorResponse> {
     let session = app_state
+        .sessions
         .write()
         .await
-        .sessions
         .remove(&request.ticket)
         .ok_or_else(|| ErrorResponse::not_found("Session not found"))?;
 
     Ok(ws.on_upgrade(move |ws| async move {
         let ticket = session.ticket.clone();
         app_state
+            .proxy_requests
             .write()
             .await
-            .proxy_requests
             .insert(session.ticket.clone(), session.proxy_requests.clone());
 
         if let Err(err) = session.handle_websocket_connection(ws).await {
             log::error!("Error handling WebSocket connection: {:?}", err);
         }
 
-        app_state.write().await.proxy_requests.remove(&ticket);
+        app_state.proxy_requests.write().await.remove(&ticket);
     }))
 }

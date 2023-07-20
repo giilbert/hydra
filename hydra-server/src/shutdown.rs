@@ -49,7 +49,7 @@ pub async fn run_check_test(state: AppState) {
 
 async fn cleanup(state: AppState) {
     // removing all containers
-    if let Err(e) = state.read().await.container_pool.shutdown().await {
+    if let Err(e) = state.container_pool.shutdown().await {
         log::error!("Failed to shutdown container pool: {}", e);
     }
 }
