@@ -1,5 +1,5 @@
 [workspace]
-members = ["hydra-container", "hydra-proxy", "hydra-server", "protocol"]
+members = ["hydra-container", "hydra-proxy", "hydra-server", "protocol", "shared"]
 
 [profile.release]
 panic = "abort"

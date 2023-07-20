@@ -6,6 +6,7 @@ use axum::response::Response;
 use axum::{extract::State, Json};
 use protocol::{ContainerSent, ExecuteOptions};
 use serde::{Deserialize, Serialize};
+use shared::ErrorResponse;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -24,16 +25,16 @@ pub async fn execute(
     State(app_state): State<AppState>,
     Query(params): Query<ExecuteQueryParams>,
     Json(options): Json<ExecuteOptions>,
-) -> Result<Json<ExecuteResponse>, &'static str> {
+) -> Result<Json<ExecuteResponse>, ErrorResponse> {
     if params.api_key != app_state.read().await.api_key {
-        return Err("Invalid API key");
+        return ErrorResponse::unauthorized("Invalid API key").into();
     }
 
     let session = Session::new(options, app_state.clone())
         .await
         .map_err(|e| {
             log::error!("{e}");
-            "Failed to create run request."
+            ErrorResponse::error("Failed to create run request.").into()
         })?;
 
     let ticket = session.ticket.clone();
@@ -66,24 +67,24 @@ pub async fn execute_headless(
     State(app_state): State<AppState>,
     Query(params): Query<ExecuteQueryParams>,
     Json(options): Json<ExecuteHeadlessRequest>,
-) -> Result<Json<ExecuteHeadlessReponse>, &'static str> {
+) -> Result<Json<ExecuteHeadlessReponse>, ErrorResponse> {
     if params.api_key != app_state.read().await.api_key {
-        return Err("Invalid API key");
+        return ErrorResponse::unauthorized("Invalid API key").into();
     }
 
     let mut container_req = app_state.read().await.container_pool.take_one().await;
     let mut container = container_req
         .recv()
         .await
-        .ok_or("Error receiving container")?;
+        .ok_or_else(|| ErrorResponse::error("Error receiving container"))?;
 
     log::info!("execute_headless");
     container
         .rpc_setup_from_options(options.execute_options)
         .await
         .map_err(|e| {
-            log::error!("{e}");
-            "Failed to setup container."
+            log::error!("error setting up: {e}");
+            ErrorResponse::error("Failed to set up container")
         })?;
 
     // TODO: let the user specify the command
@@ -91,8 +92,8 @@ pub async fn execute_headless(
         .rpc_pty_create("python3".into(), vec!["main.py".into()])
         .await
         .map_err(|e| {
-            log::error!("{e}");
-            "Failed to create pty."
+            log::error!("error creating pty: {e}");
+            ErrorResponse::error("Failed to create pty.")
         })? as u32;
 
     // FIXME:
@@ -104,7 +105,7 @@ pub async fn execute_headless(
         .await
         .map_err(|e| {
             log::error!("{e}");
-            "Failed to input"
+            ErrorResponse::error("Failed to input to pty.")
         })?;
 
     let mut full_output = String::new();
@@ -152,23 +153,26 @@ pub async fn execute_websocket(
     State(app_state): State<AppState>,
     Query(request): Query<ExecuteWebsocketRequest>,
     ws: WebSocketUpgrade,
-) -> Result<Response, &'static str> {
-    let session = app_state.write().await.sessions.remove(&request.ticket);
+) -> Result<Response, ErrorResponse> {
+    let session = app_state
+        .write()
+        .await
+        .sessions
+        .remove(&request.ticket)
+        .ok_or_else(|| ErrorResponse::not_found("Session not found"))?;
 
-    session.map_or(Err("No such ticket"), |session| {
-        Ok(ws.on_upgrade(move |ws| async move {
-            let ticket = session.ticket.clone();
-            app_state
-                .write()
-                .await
-                .proxy_requests
-                .insert(session.ticket.clone(), session.proxy_requests.clone());
+    Ok(ws.on_upgrade(move |ws| async move {
+        let ticket = session.ticket.clone();
+        app_state
+            .write()
+            .await
+            .proxy_requests
+            .insert(session.ticket.clone(), session.proxy_requests.clone());
 
-            if let Err(err) = session.handle_websocket_connection(ws).await {
-                log::error!("Error handling WebSocket connection: {:?}", err);
-            }
+        if let Err(err) = session.handle_websocket_connection(ws).await {
+            log::error!("Error handling WebSocket connection: {:?}", err);
+        }
 
-            app_state.write().await.proxy_requests.remove(&ticket);
-        }))
-    })
+        app_state.write().await.proxy_requests.remove(&ticket);
+    }))
 }
