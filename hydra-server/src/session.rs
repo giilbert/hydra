@@ -130,10 +130,6 @@ impl Session {
 
             app_state.sessions.write().await.remove(&ticket);
             let _ = container.write().await.stop().await;
-            log::info!(
-                "[dok-{}]: cleaned - prime_self_destruct",
-                &container.read().await.docker_id[..5]
-            );
         }));
     }
 

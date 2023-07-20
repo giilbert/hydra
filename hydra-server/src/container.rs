@@ -1,5 +1,9 @@
 use crate::{config::Config, rpc::RpcRecords, shutdown, Environment};
-use bollard::{container, service::HostConfig, Docker};
+use bollard::{
+    container,
+    service::{ContainerState, ContainerStateStatusEnum, HostConfig},
+    Docker,
+};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
@@ -103,8 +107,7 @@ impl Container {
 
         let display_id = format!("dok-{}", &res.id[0..5]);
 
-        log::info!("Created container: [{display_id}]");
-        log::info!("Full ID: {}", res.id);
+        log::info!("Created container: [{display_id}], full id: {}", res.id);
 
         DOCKER.start_container::<String>(&res.id, None).await?;
 
@@ -158,7 +161,7 @@ impl Container {
     }
 
     pub async fn stop(&mut self) -> anyhow::Result<()> {
-        log::info!("[{}]: queued normal stop", self.display_id);
+        log::info!("[{}]: 1,0. queued normal stop", self.display_id);
         self.commands_tx.send(ContainerCommands::Stop).await?;
         if let Some(deletion_tx) = &self.deletion_tx {
             deletion_tx.send(self.docker_id.clone()).await?;
@@ -364,6 +367,7 @@ impl Container {
                             log::debug!("[{logging_id}] Sent message: {:#?}", msg);
                         }
                         ContainerCommands::Stop => {
+                            log::info!("[{logging_id}]: 1,1. received stop command, exiting event loop");
                             break;
                         }
                     }
@@ -385,9 +389,15 @@ impl Container {
         stop: Arc<watch::Sender<()>>,
         deletion_tx: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<()> {
+        // reading stop messages:
+        // eg 1,0. message
+        // first number - must be counted up to 5 starting at 1
+        // second number - optional numbers
+
         let (mut container_ws_tx, mut container_ws_rx) = ws_stream.split();
         let logging_id = format!("dok-{}", &container_id[0..5]);
 
+        // this event loop exits when stop is fired or when the container websocket closes
         if let Err(e) = Container::run_event_loop(
             &mut container_ws_rx,
             &mut container_ws_tx,
@@ -405,39 +415,55 @@ impl Container {
             );
         }
 
-        log::info!("[{logging_id}]: broadcasting stop");
+        log::info!("[{logging_id}]: 2. broadcasting stop");
+        // this notifies all other tasks
         let _ = stop.send(());
 
         let mut ws_stream = container_ws_tx
             .reunite(container_ws_rx)
             .expect("container tx and rx do not match");
         let _ = ws_stream.close(None).await;
-        log::info!("[{logging_id}]: closed container websocket");
+
+        log::info!("[{logging_id}]: 3. closed container websocket");
 
         fs::remove_dir_all(&socket_dir)
             .await
             .expect("Error removing socket dir");
 
-        if let Err(err) = DOCKER
-            .remove_container(
-                &container_id,
-                Some(bollard::container::RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                }),
-            )
-            .await
+        log::info!("[{logging_id}]: 4. removing container socket directory");
+
+        let res = DOCKER.inspect_container(&container_id, None).await?;
+        let state = res.state.map(|state| state.status).flatten();
+
+        if state
+            .clone()
+            .is_some_and(|state| state != ContainerStateStatusEnum::REMOVING)
         {
-            log::warn!(
-            "[{logging_id}]: !!THIS MAY OR MAY NOT BE AN ERROR!! error removing container: {err}"
-        );
+            log::info!(
+                "[{logging_id}]: 5,0. removing docker container, state == {}",
+                state.unwrap()
+            );
+
+            if let Err(err) = DOCKER
+                .remove_container(
+                    &container_id,
+                    Some(bollard::container::RemoveContainerOptions {
+                        force: true,
+                        ..Default::default()
+                    }),
+                )
+                .await
+            {
+                log::error!("5,0. error removing container: {:#?}", err);
+            }
         }
+
+        log::info!("[{logging_id}]: 5,1 removed docker container, exiting");
 
         if let Some(deletion_tx) = deletion_tx {
+            // notify the deletion task that this container is done and deleted
             deletion_tx.send(container_id).await?;
         }
-
-        log::info!("[{logging_id}]: final stop");
 
         Ok(())
     }
