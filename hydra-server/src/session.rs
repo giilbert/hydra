@@ -52,6 +52,7 @@ pub struct Session {
     pub ticket: Uuid,
     pub display_id: String,
     pub proxy_requests: mpsc::Sender<ProxyPayload>,
+
     proxy_rx: Arc<Mutex<Option<mpsc::Receiver<ProxyPayload>>>>,
     container: Arc<RwLock<Container>>,
     self_destruct_timer: Mutex<Option<JoinHandle<()>>>,
@@ -61,7 +62,7 @@ pub struct Session {
 impl Session {
     pub async fn new(options: ExecuteOptions, app_state: AppState) -> anyhow::Result<Self> {
         let ticket = Uuid::new_v4();
-        let mut container = {
+        let container = {
             let mut recv = app_state.container_pool.take_one().await;
             recv.recv()
                 .await
@@ -215,7 +216,7 @@ impl Session {
     }
 
     pub async fn handle_websocket_connection(mut self, ws: WebSocket) -> anyhow::Result<()> {
-        let mut stop_rx = self.container.read().await.stop_rx.clone();
+        let mut stop_rx = self.container.read().await.on_stop();
         self.cancel_self_destruct().await;
 
         let machine_ip = if std::env::var("FLY_PRIVATE_IP").is_ok() {
@@ -241,8 +242,7 @@ impl Session {
             .container
             .write()
             .await
-            .container_rx
-            .take()
+            .listen()
             .expect("container already taken");
 
         // this task handles messages from the container
@@ -285,6 +285,7 @@ impl Session {
                                     continue;
                                 }
                             };
+
                         response_tx.send(response).unwrap();
                     }
                     _ = stop_rx_clone.changed() => {
@@ -346,9 +347,17 @@ impl Session {
 
         log::debug!("[{}] Closing websocket", this.display_id);
 
-        let _ = this.container.read().await.stop.send(());
+        if let Err(e) = this.container.read().await.stop().await {
+            log::error!(
+                "[{}] Error trying to stop container: {}",
+                this.display_id,
+                e
+            );
+        }
+
         client_sender_task.await?;
         container_message_task.await?;
+
         let ws_tx = maybe_ws_tx
             .lock()
             .await

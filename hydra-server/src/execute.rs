@@ -110,7 +110,7 @@ pub async fn execute_headless(
 
     let mut full_output = String::new();
 
-    let mut container_rx = container.container_rx.take().expect("No container_rx");
+    let mut container_rx = container.listen().expect("error listening to container");
 
     loop {
         tokio::select! {

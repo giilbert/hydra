@@ -1,7 +1,7 @@
 use crate::{config::Config, rpc::RpcRecords, shutdown, Environment};
 use bollard::{
     container,
-    service::{ContainerState, ContainerStateStatusEnum, HostConfig},
+    service::{ContainerStateStatusEnum, HostConfig},
     Docker,
 };
 use futures_util::{
@@ -14,7 +14,14 @@ use protocol::{
     ExecuteOptions, HostSent,
 };
 use serde_json::Value;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::{
     fs,
     net::{UnixListener, UnixStream},
@@ -39,14 +46,15 @@ lazy_static! {
 pub struct Container {
     pub docker_id: String,
     pub display_id: String,
-    pub container_rx: Option<mpsc::Receiver<ContainerSent>>,
-    pub stop: Arc<watch::Sender<()>>,
-    /// An event that is fired when the container is stopped
-    pub stop_rx: watch::Receiver<()>,
-    pub stopped: bool,
+    pub stopped: AtomicBool,
     pub socket_dir: PathBuf,
 
     _id: Uuid,
+
+    /// An event that is fired when the container is stopped
+    stop_rx: watch::Receiver<()>,
+
+    container_rx: Option<mpsc::Receiver<ContainerSent>>,
     deletion_tx: Option<mpsc::Sender<String>>,
     commands_tx: mpsc::Sender<ContainerCommands>,
     /// Keeps track of RPC calls and is used for responses
@@ -64,21 +72,20 @@ pub enum ContainerCommands {
 impl Container {
     pub async fn new(deletion_tx: Option<mpsc::Sender<String>>) -> anyhow::Result<Self> {
         let id = Uuid::new_v4();
-        let run_dir = if Environment::get() == Environment::Production {
+        let hydra_run_dir = if Environment::get() == Environment::Production {
             PathBuf::from("/run/hydra")
         } else {
             PathBuf::from("/tmp/hydra")
         };
-        let socket_dir = run_dir.join(format!("sockets/{}", id));
-        let (stop, stop_rx) = watch::channel(());
-        let stop = Arc::new(stop);
+        let container_socket_dir = hydra_run_dir.join(format!("sockets/{}", id));
+        let (stop_tx, stop_rx) = watch::channel(());
 
-        fs::create_dir_all(&socket_dir).await?;
+        fs::create_dir_all(&container_socket_dir).await?;
 
-        let addr = format!("{}/conn.sock", socket_dir.to_string_lossy());
+        let addr = format!("{}/conn.sock", container_socket_dir.to_string_lossy());
         let listener = UnixListener::bind(addr)?;
 
-        let res = DOCKER
+        let create_response = DOCKER
             .create_container(
                 Some(container::CreateContainerOptions {
                     name: format!("hydra-container--tck-{id}"),
@@ -89,7 +96,7 @@ impl Container {
                     host_config: Some(HostConfig {
                         binds: Some(vec![format!(
                             "{}:/run/hydra",
-                            run_dir.join(&socket_dir).to_string_lossy()
+                            hydra_run_dir.join(&container_socket_dir).to_string_lossy()
                         )]),
                         // // TESTING VALUE
                         // auto_remove: None,
@@ -105,68 +112,82 @@ impl Container {
             )
             .await?;
 
-        let display_id = format!("dok-{}", &res.id[0..5]);
+        let display_id = format!("dok-{}", &create_response.id[0..5]);
 
-        log::info!("Created container: [{display_id}], full id: {}", res.id);
+        log::info!(
+            "Created container: [{display_id}], full id: {}",
+            create_response.id
+        );
 
-        DOCKER.start_container::<String>(&res.id, None).await?;
+        DOCKER
+            .start_container::<String>(&create_response.id, None)
+            .await?;
 
         let ws_stream = match listener.accept().await {
             Ok((stream, _)) => accept_async(stream).await?,
             Err(e) => {
                 log::error!("[{display_id}] Error during initial WebSocket Connection: {e}",);
-                fs::remove_dir_all(&socket_dir).await?;
+                fs::remove_dir_all(&container_socket_dir).await?;
                 return Err(e.into());
             }
         };
 
-        let (commands_tx, commands_rx) = mpsc::channel::<ContainerCommands>(32);
+        let (container_commands_tx, container_commands_rx) = mpsc::channel::<ContainerCommands>(32);
 
         let rpc_records = Arc::new(Mutex::new(RpcRecords::new()));
         let proxy_records = Arc::new(Mutex::new(RpcRecords::new()));
 
-        let (container_tx, container_rx) = mpsc::channel::<ContainerSent>(64);
+        let (container_message_tx, container_message_rx) = mpsc::channel::<ContainerSent>(64);
 
         tokio::spawn(Container::forward_logs(
-            res.id.clone(),
-            format!("dok-{}", &res.id[0..5]),
+            create_response.id.clone(),
+            format!("dok-{}", &create_response.id[0..5]),
             stop_rx.clone(),
         ));
         tokio::spawn(Container::run(
-            res.id.clone(),
+            create_response.id.clone(),
             ws_stream,
-            commands_rx,
+            container_commands_rx,
             rpc_records.clone(),
             proxy_records.clone(),
-            container_tx,
-            socket_dir.clone(),
-            stop.clone(),
+            container_message_tx,
+            container_socket_dir.clone(),
+            stop_tx,
             deletion_tx.clone(),
         ));
 
         Ok(Self {
             _id: id,
-            docker_id: res.id,
+            docker_id: create_response.id,
             display_id,
             deletion_tx,
-            commands_tx,
+            commands_tx: container_commands_tx,
             rpc_records,
             proxy_records,
-            socket_dir,
-            container_rx: Some(container_rx),
-            stop,
+            socket_dir: container_socket_dir,
+            container_rx: Some(container_message_rx),
             stop_rx,
-            stopped: false,
+            stopped: false.into(),
         })
     }
 
-    pub async fn stop(&mut self) -> anyhow::Result<()> {
+    pub fn listen(&mut self) -> anyhow::Result<mpsc::Receiver<ContainerSent>> {
+        self.container_rx
+            .take()
+            .ok_or(anyhow::anyhow!("container already listened to"))
+    }
+
+    pub fn on_stop(&self) -> StopRx {
+        self.stop_rx.clone()
+    }
+
+    pub async fn stop(&self) -> anyhow::Result<()> {
         log::info!("[{}]: 1,0. queued normal stop", self.display_id);
         self.commands_tx.send(ContainerCommands::Stop).await?;
         if let Some(deletion_tx) = &self.deletion_tx {
             deletion_tx.send(self.docker_id.clone()).await?;
         }
-        self.stopped = true;
+        self.stopped.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -386,7 +407,7 @@ impl Container {
         proxy_records: Arc<Mutex<RpcRecords<ContainerProxyResponse>>>,
         container_tx: mpsc::Sender<ContainerSent>,
         socket_dir: PathBuf,
-        stop: Arc<watch::Sender<()>>,
+        stop_tx: watch::Sender<()>,
         deletion_tx: Option<mpsc::Sender<String>>,
     ) -> anyhow::Result<()> {
         // reading stop messages:
@@ -417,7 +438,7 @@ impl Container {
 
         log::info!("[{logging_id}]: 2. broadcasting stop");
         // this notifies all other tasks
-        let _ = stop.send(());
+        let _ = stop_tx.send(());
 
         let mut ws_stream = container_ws_tx
             .reunite(container_ws_rx)

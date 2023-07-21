@@ -119,7 +119,6 @@ impl ContainerPool {
     }
 
     pub async fn take_one(&self) -> mpsc::Receiver<Container> {
-        log::info!("Take one called..");
         let (sender, receiver) = mpsc::channel(1);
         self.queue.write().await.push_back(sender);
         CONTAINER_QUEUE_NOTIFY.notify_waiters();
