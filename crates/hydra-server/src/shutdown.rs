@@ -6,8 +6,8 @@ use std::{
 };
 use tokio::{signal::unix::SignalKind, time};
 
-// puts the server to sleep (shuts down) after 5 minutes of inactivity.
-const TIME: u64 = 5 * 60; // 5 minutes
+// puts the server to sleep (shuts down) after 2 minutes of inactivity.
+const TIME: u64 = 2 * 60;
 
 const POLL: u32 = 30; // check every 30 seconds
 
@@ -28,6 +28,14 @@ pub fn update_last_activity() {
 }
 
 pub async fn run_check_test(state: AppState) {
+    LAST_REQUEST_TIME.store(
+        std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_secs(),
+        Ordering::Relaxed,
+    );
+
     loop {
         time::sleep(tokio::time::Duration::from_secs(POLL.into())).await;
 
@@ -68,7 +76,7 @@ pub async fn signal_handler(state: AppState) {
     println!();
 
     log::info!("Received signal. Shutting down..");
-    cleanup(state.clone()).await;
+    cleanup(state).await;
 
     log::info!("Done. Exiting.");
     std::process::exit(0);
