@@ -40,7 +40,7 @@ struct Ports {
 async fn main() -> Result<()> {
     color_eyre::install()?;
     pretty_env_logger::init();
-    dotenv::dotenv()?;
+    dotenv::dotenv().ok();
 
     Config::global();
 

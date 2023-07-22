@@ -16,5 +16,5 @@ services:
       - "3100:3100"
     volumes:
       - type: bind
-        source: ../test-config/config.toml
+        source: ./test-config/config.toml
         target: /etc/hydra/config.toml

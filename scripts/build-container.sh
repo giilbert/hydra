@@ -24,7 +24,7 @@ echo ""
 # ---------- Build ----------
 
 echo ">>> ${C_PURPLE}Building${C_RESET} hydra-container (this will also take a while)"
-echo "${C_BLUE}\$${C_RESET} docker build --file ./scripts/container.dockerfile -t hydra-container ."
+echo "${C_BLUE}\$${C_RESET} docker build --file ./deploy/container.dockerfile -t hydra-container ."
 docker build --file ./deploy/container.dockerfile -t hydra-container .
 
 echo ">>> ${C_PURPLE}Saving${C_RESET} hydra-container to images/hydra-container.tar"

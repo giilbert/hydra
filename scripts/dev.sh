@@ -22,9 +22,9 @@ if [ ! -d "/tmp/hydra" ]; then
 fi
 
 echo ">>> ${C_PURPLE}Running${C_RESET} hydra-server"
-echo "${C_BLUE}\$${C_RESET} cd ${ROOT}/scripts"
+echo "${C_BLUE}\$${C_RESET} cd ${ROOT}"
 echo ""
-cd ${ROOT}/scripts
+cd ${ROOT}
 
-echo "${C_BLUE}\$${C_RESET} docker compose --file hydra-development.yml up"
-docker compose --file hydra-development.yml up
+echo "${C_BLUE}\$${C_RESET} docker compose --file dev/hydra-development.yml up"
+docker compose --file dev/hydra-development.yml up
