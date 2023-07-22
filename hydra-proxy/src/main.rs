@@ -3,7 +3,7 @@ mod websocket;
 
 use crate::handler::handler;
 use axum::handler::HandlerWithoutStateExt;
-use color_eyre::Result;
+use shared::prelude::*;
 use std::net::SocketAddr;
 
 #[tokio::main]

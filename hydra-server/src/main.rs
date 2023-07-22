@@ -23,10 +23,10 @@ use axum::{
     Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
-use color_eyre::Result;
 use container::Container;
 use execute::execute;
 use proxy_interface::proxy;
+use shared::prelude::*;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
 

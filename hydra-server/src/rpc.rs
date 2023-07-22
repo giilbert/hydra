@@ -1,4 +1,4 @@
-use color_eyre::Result;
+use shared::prelude::*;
 use std::collections::HashMap;
 use tokio::sync::oneshot;
 use uuid::Uuid;

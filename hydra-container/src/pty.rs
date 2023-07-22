@@ -1,8 +1,8 @@
 use crate::commands::Command;
-use color_eyre::{Report, Result};
 use futures_util::{Stream, StreamExt};
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use protocol::ContainerSent;
+use shared::prelude::*;
 use std::{
     io::{Read, Write},
     ops::{Deref, DerefMut},

@@ -1,5 +1,5 @@
 use crate::Container;
-use color_eyre::Result;
+use shared::prelude::*;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{

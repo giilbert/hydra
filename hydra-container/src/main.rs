@@ -4,7 +4,7 @@ mod pty;
 mod state;
 
 use crate::commands::Commands;
-use color_eyre::Result;
+use shared::prelude::*;
 use tokio::net::UnixStream;
 use tokio_tungstenite::client_async;
 

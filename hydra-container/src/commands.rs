@@ -1,5 +1,4 @@
 use crate::{procedures::handle_rpc_procedure, state::State};
-use color_eyre::{Report, Result};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
@@ -9,6 +8,7 @@ use reqwest::{
     header::{HeaderMap, HeaderName},
     Method,
 };
+use shared::prelude::*;
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
     net::UnixStream,

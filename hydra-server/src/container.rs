@@ -4,10 +4,6 @@ use bollard::{
     service::{ContainerStateStatusEnum, HostConfig},
     Docker,
 };
-use color_eyre::{
-    eyre::{bail, eyre},
-    Result,
-};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
@@ -18,6 +14,7 @@ use protocol::{
     ExecuteOptions, HostSent,
 };
 use serde_json::Value;
+use shared::prelude::*;
 use std::{
     path::PathBuf,
     sync::{

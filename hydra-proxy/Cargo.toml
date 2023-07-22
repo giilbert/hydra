@@ -22,3 +22,4 @@ hyper = "0.14.27"
 sha1 = "0.10.5"
 base64 = "0.21.2"
 color-eyre = "0.6.2"
+shared = { path = "../shared" }
