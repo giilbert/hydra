@@ -6,8 +6,7 @@ use axum::{
     http::{request::Parts, HeaderMap, HeaderName, Method, StatusCode},
     response::IntoResponse,
 };
-use protocol::ContainerProxyRequest;
-use shared::ErrorResponse;
+use shared::{protocol::ContainerProxyRequest, ErrorResponse};
 use std::{collections::HashMap, str::FromStr};
 use tokio::sync::oneshot;
 use uuid::Uuid;

@@ -1,8 +1,7 @@
 use crate::{commands::Command, pty, state::State};
 use portable_pty::CommandBuilder;
-use protocol::ContainerRpcRequest;
 use serde_json::{json, Value};
-use shared::prelude::*;
+use shared::{prelude::*, protocol::ContainerRpcRequest};
 use std::{path::PathBuf, sync::Arc};
 use tokio::{
     fs,

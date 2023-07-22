@@ -4,9 +4,11 @@ use axum::debug_handler;
 use axum::extract::{Query, WebSocketUpgrade};
 use axum::response::Response;
 use axum::{extract::State, Json};
-use protocol::{ContainerSent, ExecuteOptions};
 use serde::{Deserialize, Serialize};
-use shared::ErrorResponse;
+use shared::{
+    protocol::{ContainerSent, ExecuteOptions},
+    ErrorResponse,
+};
 use uuid::Uuid;
 
 #[derive(Serialize)]

@@ -10,7 +10,6 @@ serde = { version = "1.0.152", features = ["serde_derive"] }
 serde_json = "1.0.93"
 tokio = { version = "1.25.0", features = ["full"] }
 tokio-tungstenite = "0.18.0"
-protocol = { path = "../protocol" }
 rmp-serde = "1.1.1"
 pty-process = { version = "0.2.0", features = ["tokio", "backend-tokio"] }
 async-stream = "0.3.3"

@@ -9,12 +9,14 @@ use futures_util::{
     SinkExt, StreamExt,
 };
 use lazy_static::lazy_static;
-use protocol::{
-    ContainerProxyRequest, ContainerProxyResponse, ContainerRpcRequest, ContainerSent,
-    ExecuteOptions, HostSent,
-};
 use serde_json::Value;
-use shared::prelude::*;
+use shared::{
+    prelude::*,
+    protocol::{
+        ContainerProxyRequest, ContainerProxyResponse, ContainerRpcRequest, ContainerSent,
+        ExecuteOptions, HostSent,
+    },
+};
 use std::{
     path::PathBuf,
     sync::{

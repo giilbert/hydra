@@ -1,8 +1,7 @@
 use crate::commands::Command;
 use futures_util::{Stream, StreamExt};
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
-use protocol::ContainerSent;
-use shared::prelude::*;
+use shared::{prelude::*, protocol::ContainerSent};
 use std::{
     io::{Read, Write},
     ops::{Deref, DerefMut},

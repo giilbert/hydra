@@ -3,12 +3,14 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use protocol::{ContainerProxyRequest, ContainerProxyResponse, ContainerSent, HostSent};
 use reqwest::{
     header::{HeaderMap, HeaderName},
     Method,
 };
-use shared::prelude::*;
+use shared::{
+    prelude::*,
+    protocol::{ContainerProxyRequest, ContainerProxyResponse, ContainerSent, HostSent},
+};
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
     net::UnixStream,

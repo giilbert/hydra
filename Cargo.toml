@@ -3,7 +3,6 @@ members = [
     "crates/hydra-container",
     "crates/hydra-proxy",
     "crates/hydra-server",
-    "crates/protocol",
     "crates/shared"
 ]
 
