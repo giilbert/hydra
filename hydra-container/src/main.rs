@@ -4,11 +4,13 @@ mod pty;
 mod state;
 
 use crate::commands::Commands;
+use color_eyre::Result;
 use tokio::net::UnixStream;
 use tokio_tungstenite::client_async;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
+    color_eyre::install()?;
     pretty_env_logger::init();
 
     let addr = "/run/hydra/conn.sock";

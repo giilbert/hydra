@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.69"
 futures-util = "0.3.26"
 log = "0.4.17"
 serde = { version = "1.0.152", features = ["serde_derive"] }
@@ -20,4 +19,5 @@ portable-pty = "0.7.0"
 pretty_env_logger = "0.4.0"
 reqwest = { version = "0.11.18", default-features = false }
 openssl = "0.10.55"
+color-eyre = "0.6.2"
 

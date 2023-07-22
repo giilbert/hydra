@@ -1,4 +1,5 @@
 use crate::commands::Command;
+use color_eyre::{Report, Result};
 use futures_util::{Stream, StreamExt};
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use protocol::ContainerSent;
@@ -82,7 +83,7 @@ impl PtySink {
         }
     }
 
-    pub fn input(&mut self, input: PtyInput) -> anyhow::Result<()> {
+    pub fn input(&mut self, input: PtyInput) -> Result<()> {
         match input {
             PtyInput::Text(s) => {
                 self.write.write_all(s.as_bytes())?;
@@ -100,18 +101,23 @@ impl PtySink {
     }
 }
 
+fn to_eyre<T>(x: T) -> Report
+where
+    T: std::fmt::Display,
+{
+    Report::msg(x.to_string())
+}
+
 fn create_raw(
     command: CommandBuilder,
     default_size: PtySize,
-) -> anyhow::Result<(PtySink, PtyStream, Box<dyn Child + Send + Sync>)> {
+) -> Result<(PtySink, PtyStream, Box<dyn Child + Send + Sync>)> {
     let pty_system = native_pty_system();
 
-    let pair = pty_system.openpty(default_size)?;
-
-    let child = pair.slave.spawn_command(command)?;
-
-    let reader = pair.master.try_clone_reader()?;
-    let writer = pair.master.try_clone_writer()?;
+    let pair = pty_system.openpty(default_size).map_err(to_eyre)?;
+    let child = pair.slave.spawn_command(command).map_err(to_eyre)?;
+    let reader = pair.master.try_clone_reader().map_err(to_eyre)?;
+    let writer = pair.master.try_clone_writer().map_err(to_eyre)?;
 
     let stream = PtyStream::new(reader);
     let sink = PtySink::new(
@@ -131,7 +137,7 @@ pub struct Pty {
 }
 
 impl Pty {
-    pub async fn send_output(mut self, commands: mpsc::Sender<Command>) -> anyhow::Result<()> {
+    pub async fn send_output(mut self, commands: mpsc::Sender<Command>) -> Result<()> {
         let mut output = self.output.take().unwrap();
 
         while let Some(x) = output.recv().await {
@@ -165,7 +171,7 @@ pub enum PtyCommands {
     Kill,
 }
 
-pub async fn create(command: CommandBuilder) -> anyhow::Result<Pty> {
+pub async fn create(command: CommandBuilder) -> Result<Pty> {
     let id = ID.fetch_add(1, Ordering::Relaxed);
     let (mut tx, mut rx, mut child) = create_raw(
         command,
@@ -193,7 +199,7 @@ pub async fn create(command: CommandBuilder) -> anyhow::Result<Pty> {
             }
         }
 
-        Ok::<_, anyhow::Error>(())
+        Ok::<_, Report>(())
     });
 
     tokio::spawn(async move {
@@ -201,7 +207,7 @@ pub async fn create(command: CommandBuilder) -> anyhow::Result<Pty> {
             output_tx.send(x).await?;
         }
 
-        Ok::<_, anyhow::Error>(())
+        Ok::<_, Report>(())
     });
 
     Ok(Pty {

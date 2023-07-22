@@ -1,4 +1,5 @@
 use crate::{procedures::handle_rpc_procedure, state::State};
+use color_eyre::{Report, Result};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
@@ -43,7 +44,7 @@ impl Commands {
         }
     }
 
-    pub async fn run(mut self) -> anyhow::Result<()> {
+    pub async fn run(mut self) -> Result<()> {
         let state = self.state.clone();
         tokio::spawn(async move {
             while let Some(command) = self.commands_rx.recv().await {
@@ -59,7 +60,7 @@ impl Commands {
                 }
             }
 
-            Ok::<_, anyhow::Error>(())
+            Ok::<_, Report>(())
         });
 
         while let Some(Ok(Message::Binary(msg))) = self.ws_rx.next().await {
@@ -122,7 +123,7 @@ impl Commands {
             }
         }
 
-        Ok::<_, anyhow::Error>(())
+        Ok(())
     }
 }
 

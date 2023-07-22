@@ -1,5 +1,9 @@
 use crate::{container::Container, AppState};
 use axum::extract::ws::{Message, WebSocket};
+use color_eyre::{
+    eyre::{bail, eyre},
+    Result,
+};
 use futures_util::{SinkExt, StreamExt};
 use protocol::{
     ContainerProxyRequest, ContainerProxyResponse, ContainerRpcRequest, ContainerSent,
@@ -60,13 +64,13 @@ pub struct Session {
 }
 
 impl Session {
-    pub async fn new(options: ExecuteOptions, app_state: AppState) -> anyhow::Result<Self> {
+    pub async fn new(options: ExecuteOptions, app_state: AppState) -> Result<Self> {
         let ticket = Uuid::new_v4();
         let container = {
             let mut recv = app_state.container_pool.take_one().await;
             recv.recv()
                 .await
-                .ok_or_else(|| anyhow::anyhow!("No containers available"))?
+                .ok_or_else(|| eyre!("No containers available"))?
         };
 
         log::info!(
@@ -88,7 +92,7 @@ impl Session {
                 &ticket.to_string()[0..5],
                 e
             );
-            anyhow::bail!("Failed to setup container")
+            bail!("Failed to setup container")
         }
 
         let (proxy_tx, proxy_rx) = mpsc::channel(32);
@@ -144,7 +148,7 @@ impl Session {
         &self,
         message: String,
         _messages_tx: &mut mpsc::Sender<Message>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let data = match serde_json::from_str::<ClientMessage>(&message) {
             Ok(data) => data,
             Err(e) => {
@@ -189,7 +193,7 @@ impl Session {
     async fn send_client_message(
         message: ServerMessage,
         messages_tx: &mut mpsc::Sender<Message>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         messages_tx
             .send(Message::Text(
                 serde_json::to_string(&message).expect("serde_json error"),
@@ -201,7 +205,7 @@ impl Session {
     async fn handle_container_message(
         message: ContainerSent,
         messages_tx: &mut mpsc::Sender<Message>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         match message {
             ContainerSent::PtyOutput { output, .. } => {
                 Self::send_client_message(ServerMessage::PtyOutput { output }, messages_tx).await?;
@@ -215,7 +219,7 @@ impl Session {
         Ok(())
     }
 
-    pub async fn handle_websocket_connection(mut self, ws: WebSocket) -> anyhow::Result<()> {
+    pub async fn handle_websocket_connection(mut self, ws: WebSocket) -> Result<()> {
         let mut stop_rx = self.container.read().await.on_stop();
         self.cancel_self_destruct().await;
 
@@ -372,7 +376,7 @@ impl Session {
                 .downcast::<WSError>()
                 // i think only tungstenite errors are possible, but idk
                 .map_err(|e| {
-                    anyhow::anyhow!(
+                    eyre!(
                         "[{}] Received anything but a tungstenite error: {:?}",
                         this.display_id,
                         e

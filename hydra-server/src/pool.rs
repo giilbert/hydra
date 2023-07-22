@@ -1,4 +1,5 @@
 use crate::Container;
+use color_eyre::Result;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -125,7 +126,7 @@ impl ContainerPool {
         return receiver;
     }
 
-    pub async fn shutdown(&self) -> anyhow::Result<()> {
+    pub async fn shutdown(&self) -> Result<()> {
         use tokio::fs;
 
         for (id, container) in self.containers.read().await.iter() {

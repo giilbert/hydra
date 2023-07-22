@@ -4,6 +4,10 @@ use bollard::{
     service::{ContainerStateStatusEnum, HostConfig},
     Docker,
 };
+use color_eyre::{
+    eyre::{bail, eyre},
+    Result,
+};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
@@ -70,7 +74,7 @@ pub enum ContainerCommands {
 }
 
 impl Container {
-    pub async fn new(deletion_tx: Option<mpsc::Sender<String>>) -> anyhow::Result<Self> {
+    pub async fn new(deletion_tx: Option<mpsc::Sender<String>>) -> Result<Self> {
         let id = Uuid::new_v4();
         let hydra_run_dir = if Environment::get() == Environment::Production {
             PathBuf::from("/run/hydra")
@@ -171,17 +175,17 @@ impl Container {
         })
     }
 
-    pub fn listen(&mut self) -> anyhow::Result<mpsc::Receiver<ContainerSent>> {
+    pub fn listen(&mut self) -> Result<mpsc::Receiver<ContainerSent>> {
         self.container_rx
             .take()
-            .ok_or(anyhow::anyhow!("container already listened to"))
+            .ok_or(eyre!("container already listened to"))
     }
 
     pub fn on_stop(&self) -> StopRx {
         self.stop_rx.clone()
     }
 
-    pub async fn stop(&self) -> anyhow::Result<()> {
+    pub async fn stop(&self) -> Result<()> {
         log::info!("[{}]: 1,0. queued normal stop", self.display_id);
         self.commands_tx.send(ContainerCommands::Stop).await?;
         if let Some(deletion_tx) = &self.deletion_tx {
@@ -191,7 +195,7 @@ impl Container {
         Ok(())
     }
 
-    pub async fn rpc(&self, req: ContainerRpcRequest) -> anyhow::Result<Result<Value, String>> {
+    pub async fn rpc(&self, req: ContainerRpcRequest) -> Result<Result<Value, String>> {
         let id = Uuid::new_v4();
 
         log::debug!("[{}]: sent RPC request", self.display_id);
@@ -207,8 +211,8 @@ impl Container {
         let mut stop_rx_clone = self.stop_rx.clone();
         let response = tokio::select! {
             d = await_response => d,
-            _ = tokio::time::sleep(Duration::from_secs(10)) => anyhow::bail!("container failed to respond to RPC in 10 seconds"),
-            _ = stop_rx_clone.changed() => anyhow::bail!("container stopped during RPC")
+            _ = tokio::time::sleep(Duration::from_secs(10)) => bail!("container failed to respond to RPC in 10 seconds"),
+            _ = stop_rx_clone.changed() => bail!("container stopped during RPC")
         };
         let res = response?;
 
@@ -217,35 +221,29 @@ impl Container {
         Ok(res)
     }
 
-    pub async fn rpc_setup_from_options(&self, options: ExecuteOptions) -> anyhow::Result<()> {
+    pub async fn rpc_setup_from_options(&self, options: ExecuteOptions) -> Result<()> {
         self.rpc(ContainerRpcRequest::SetupFromOptions {
             files: options.files,
         })
         .await?
-        .map_err(|e| anyhow::anyhow!("container failed to setup from options: {:?}", e))?;
+        .map_err(|e| eyre!("container failed to setup from options: {:?}", e))?;
 
         Ok(())
     }
 
-    pub async fn rpc_pty_create(
-        &self,
-        command: String,
-        arguments: Vec<String>,
-    ) -> anyhow::Result<u64> {
+    pub async fn rpc_pty_create(&self, command: String, arguments: Vec<String>) -> Result<u64> {
         let response = self
             .rpc(ContainerRpcRequest::PtyCreate { command, arguments })
             .await?
-            .map_err(|e| anyhow::anyhow!("container failed to create pty: {:?}", e))?;
+            .map_err(|e| eyre!("container failed to create pty: {:?}", e))?;
 
-        Ok(response
-            .as_u64()
-            .ok_or_else(|| anyhow::anyhow!("invalid pty id"))?)
+        Ok(response.as_u64().ok_or_else(|| eyre!("invalid pty id"))?)
     }
 
-    pub async fn rpc_pty_input(&self, pty_id: u32, input: String) -> anyhow::Result<()> {
+    pub async fn rpc_pty_input(&self, pty_id: u32, input: String) -> Result<()> {
         self.rpc(ContainerRpcRequest::PtyInput { id: pty_id, input })
             .await?
-            .map_err(|e| anyhow::anyhow!("error inputting: {:?}", e))?;
+            .map_err(|e| eyre!("error inputting: {:?}", e))?;
 
         Ok(())
     }
@@ -253,7 +251,7 @@ impl Container {
     pub async fn proxy_request(
         &self,
         req: ContainerProxyRequest,
-    ) -> anyhow::Result<ContainerProxyResponse> {
+    ) -> Result<ContainerProxyResponse> {
         let id = Uuid::new_v4();
 
         log::debug!("[{}]: sent proxy request", self.display_id);
@@ -268,14 +266,14 @@ impl Container {
         let mut stop_rx_clone = self.stop_rx.clone();
         let response = tokio::select! {
             d = await_response => d,
-            _ = tokio::time::sleep(Duration::from_secs(10)) => anyhow::bail!("container failed to respond to RPC in 10 seconds"),
-            _ = stop_rx_clone.changed() => anyhow::bail!("container stopped during RPC")
+            _ = tokio::time::sleep(Duration::from_secs(10)) => bail!("container failed to respond to RPC in 10 seconds"),
+            _ = stop_rx_clone.changed() => bail!("container stopped during RPC")
         };
         let res = response?;
 
         log::debug!("[{}]: got proxy response", self.display_id);
 
-        res.map_err(|e| anyhow::anyhow!("container failed to proxy: {:?}", e))
+        res.map_err(|e| eyre!("container failed to proxy: {:?}", e))
     }
 
     async fn forward_logs(container_id: String, logging_id: String, mut stop_rx: StopRx) {
@@ -311,7 +309,7 @@ impl Container {
         proxy_records: &Mutex<RpcRecords<ContainerProxyResponse>>,
         container_tx: &mpsc::Sender<ContainerSent>,
         logging_id: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         match msg {
             ContainerSent::RpcResponse { id, result } => {
                 let response = serde_json::from_str::<Result<Value, String>>(&result)
@@ -348,7 +346,7 @@ impl Container {
         container_tx: &mpsc::Sender<ContainerSent>,
 
         logging_id: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         loop {
             tokio::select! {
                 Some(msg) = container_ws_rx.next() => {
@@ -409,7 +407,7 @@ impl Container {
         socket_dir: PathBuf,
         stop_tx: watch::Sender<()>,
         deletion_tx: Option<mpsc::Sender<String>>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         // reading stop messages:
         // eg 1,0. message
         // first number - must be counted up to 5 starting at 1

@@ -1,4 +1,5 @@
 use crate::{commands::Command, pty, state::State};
+use color_eyre::{eyre::eyre, Result};
 use portable_pty::CommandBuilder;
 use protocol::ContainerRpcRequest;
 use serde_json::{json, Value};
@@ -12,7 +13,7 @@ pub async fn handle_rpc_procedure(
     commands: &mpsc::Sender<Command>,
     req: ContainerRpcRequest,
     state: Arc<Mutex<State>>,
-) -> anyhow::Result<Result<Value, String>> {
+) -> Result<Result<Value, String>> {
     log::debug!("Got RPC: {:?}", req);
 
     match req {
@@ -32,9 +33,7 @@ pub async fn handle_rpc_procedure(
         ContainerRpcRequest::PtyInput { id, input } => {
             // panic!();
             let mut state = state.lock().await;
-            let pty = state
-                .get_pty(id)
-                .ok_or_else(|| anyhow::anyhow!("cannot find pty"))?;
+            let pty = state.get_pty(id).ok_or_else(|| eyre!("cannot find pty"))?;
 
             pty.send(pty::PtyCommands::Input(pty::PtyInput::Text(
                 input.to_string(),

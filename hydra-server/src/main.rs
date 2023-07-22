@@ -23,6 +23,7 @@ use axum::{
     Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
+use color_eyre::Result;
 use container::Container;
 use execute::execute;
 use proxy_interface::proxy;
@@ -36,9 +37,11 @@ struct Ports {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    dotenv::dotenv().ok();
+async fn main() -> Result<()> {
+    color_eyre::install()?;
     pretty_env_logger::init();
+    dotenv::dotenv()?;
+
     Config::global();
 
     let environment = Environment::get();
@@ -121,7 +124,7 @@ async fn create_rustls_config() -> RustlsConfig {
 }
 
 async fn redirect_http_to_https(ports: Ports) {
-    fn make_https(host: String, uri: Uri, ports: Ports) -> anyhow::Result<Uri> {
+    fn make_https(host: String, uri: Uri, ports: Ports) -> Result<Uri> {
         let mut parts = uri.into_parts();
 
         parts.scheme = Some(axum::http::uri::Scheme::HTTPS);

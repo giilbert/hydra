@@ -3,10 +3,12 @@ mod websocket;
 
 use crate::handler::handler;
 use axum::handler::HandlerWithoutStateExt;
+use color_eyre::Result;
 use std::net::SocketAddr;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
+    color_eyre::install()?;
     pretty_env_logger::init();
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3101));
@@ -14,6 +16,7 @@ async fn main() {
 
     axum::Server::bind(&addr.into())
         .serve(tower::make::Shared::new(handler.into_service()))
-        .await
-        .unwrap();
+        .await?;
+
+    Ok(())
 }
