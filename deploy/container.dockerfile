@@ -7,25 +7,32 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-ADD Cargo.toml Cargo.toml
-ADD hydra-container/Cargo.toml hydra-container/Cargo.toml
-ADD hydra-server/Cargo.toml hydra-server/Cargo.toml
-ADD hydra-proxy/Cargo.toml hydra-proxy/Cargo.toml
-ADD protocol protocol
+RUN mkdir crates \
+    && cargo new --bin crates/hydra-container \
+    && cargo new --bin crates/hydra-server \
+    && cargo new --bin crates/hydra-proxy \
+    && cargo new --lib crates/shared
 
-RUN --mount=type=cache,target=/usr/src/hydra/target mkdir hydra-container/src hydra-server/src hydra-proxy/src \
-    && touch hydra-container/src/main.rs hydra-server/src/main.rs hydra-proxy/src/main.rs \
-    && echo "fn main() {}" > hydra-container/src/main.rs \
-    && echo "fn main() {}" > hydra-server/src/main.rs \
-    && echo "fn main() {}" > hydra-proxy/src/main.rs \
-    && cargo build --release --bin hydra-container \
-    && rm -rf hydra-container hydra-server
+COPY Cargo.toml Cargo.lock ./
 
-COPY . .
+# Copy the Cargo.toml files into the image and compile only the dependencies
+# storing them in a layer that we can cache and reuse
+COPY crates/hydra-container/Cargo.toml crates/hydra-container/Cargo.toml
+COPY crates/hydra-server/Cargo.toml crates/hydra-server/Cargo.toml
+COPY crates/hydra-proxy/Cargo.toml crates/hydra-proxy/Cargo.toml
+COPY crates/shared/Cargo.toml crates/shared/Cargo.toml
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/src/hydra/target \
+    cargo build --release --bin hydra-container
 
-# update mtime to force rebuild, and then build after building dependencies and caching them
-RUN --mount=type=cache,target=/usr/src/hydra/target touch hydra-container/src/main.rs \
-    && cargo build --release --bin hydra-container \
+COPY crates/shared crates/shared
+COPY crates/hydra-container crates/hydra-container
+
+RUN touch crates/hydra-container/src/main.rs
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/src/hydra/target \
+    cargo build --release --package hydra-container \
     && mv target/release/hydra-container /bin/hydra-container
 
 # hydra-container
