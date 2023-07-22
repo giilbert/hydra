@@ -4,41 +4,50 @@ WORKDIR /usr/src/hydra
 
 RUN apk add --no-cache musl-dev
 
-ADD Cargo.toml Cargo.toml
-ADD hydra-container/Cargo.toml hydra-container/Cargo.toml
-ADD hydra-server/Cargo.toml hydra-server/Cargo.toml
-ADD hydra-proxy/Cargo.toml hydra-proxy/Cargo.toml
-ADD protocol protocol
+RUN mkdir crates \
+    && cargo new --bin crates/hydra-container \
+    && cargo new --bin crates/hydra-server \
+    && cargo new --bin crates/hydra-proxy \
+    && cargo new --lib crates/shared
 
-RUN --mount=type=cache,target=/usr/src/hydra/target mkdir hydra-container/src hydra-server/src hydra-proxy/src \
-    && touch hydra-container/src/main.rs hydra-server/src/main.rs hydra-proxy/src/main.rs \
-    && echo "fn main() {}" > hydra-container/src/main.rs \
-    && echo "fn main() {}" > hydra-server/src/main.rs \
-    && echo "fn main() {}" > hydra-proxy/src/main.rs \
-    && cargo build --release --bin hydra-server \
-    && rm -rf hydra-container hydra-server hydra-proxy
+COPY Cargo.toml Cargo.lock ./
 
-COPY protocol protocol
-COPY hydra-server hydra-server
-COPY hydra-container hydra-container
-COPY hydra-proxy hydra-proxy
-COPY Cargo.toml Cargo.toml
+# Copy the Cargo.toml files into the image and compile only the dependencies
+# storing them in a layer that we can cache and reuse
+COPY crates/hydra-container/Cargo.toml crates/hydra-container/Cargo.toml
+COPY crates/hydra-server/Cargo.toml crates/hydra-server/Cargo.toml
+COPY crates/hydra-proxy/Cargo.toml crates/hydra-proxy/Cargo.toml
+COPY crates/shared/Cargo.toml crates/shared/Cargo.toml
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/src/hydra/target \
+    cargo build --release --bin hydra-server
 
-# update mtime to force rebuild, and then build after building dependencies and caching them
-RUN --mount=type=cache,target=/usr/src/hydra/target touch hydra-server/src/main.rs \
-    && cargo build --release --bin hydra-server \
+COPY crates/shared crates/shared
+COPY crates/hydra-server crates/hydra-server
+
+RUN touch crates/hydra-server/src/main.rs
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/src/hydra/target \
+    cargo build --release --package hydra-server \
     && mv target/release/hydra-server /bin/hydra-server
 
 # hydra-server
 FROM docker:dind
-USER root
+
 RUN apk add --no-cache libressl-dev ca-certificates-bundle tini bash ncurses
-COPY --from=builder /bin/hydra-server /bin/hydra-server
+
 COPY images /images
-COPY ./scripts/server-entrypoint.sh /server-entrypoint.sh
-ADD test-certs /etc/hydra/test-certs
-ENV RUST_LOG=info
+COPY scripts/server-entrypoint.sh /server-entrypoint.sh
+COPY dev/test-certs /etc/hydra/test-certs
+
 WORKDIR /etc/hydra
 RUN chmod +x /server-entrypoint.sh
+
+ENV RUST_LOG=info
+ENV RUST_BACKTRACE=1
 EXPOSE 3100
+
+COPY --from=builder /bin/hydra-server /bin/hydra-server
+
 CMD ["/server-entrypoint.sh"]
