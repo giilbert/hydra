@@ -38,7 +38,7 @@ FROM docker:dind
 RUN apk add --no-cache libressl-dev ca-certificates-bundle tini bash ncurses
 
 COPY images /images
-COPY scripts/server-entrypoint.sh /server-entrypoint.sh
+COPY deploy/server-entrypoint.sh /server-entrypoint.sh
 COPY dev/test-certs /etc/hydra/test-certs
 
 WORKDIR /etc/hydra

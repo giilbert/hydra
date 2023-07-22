@@ -13,7 +13,7 @@ echo ""
 
 # Start docker service in background
 echo "> ${C_PURPLE}Booting${C_RESET} - Spawned dockerd"
-nohup dockerd >/dev/null 2>&1
+nohup dockerd &
 
 # Wait until the docker service is up
 while ! docker ps; do
