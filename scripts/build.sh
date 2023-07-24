@@ -23,9 +23,9 @@ echo ""
 
 # ---------- Build ----------
 
-echo ">>> ${C_PURPLE}Building${C_RESET} hydra-container (this will take a while)"
-echo "${C_BLUE}\$${C_RESET} ./scripts/build-container.sh"
-./scripts/build-container.sh
+echo ">>> ${C_PURPLE}Building${C_RESET} hydrad (this will take a while)"
+echo "${C_BLUE}\$${C_RESET} ./scripts/build-hydrad.sh"
+./scripts/build-hydrad.sh
 
 echo ">>> ${C_PURPLE}Building${C_RESET} hydra-server (this will take a while)"
 echo "${C_BLUE}\$${C_RESET} docker build --file ./deploy/server.dockerfile -t hydra-server ."
@@ -36,7 +36,7 @@ docker build --file ./deploy/server.dockerfile -t hydra-server .
 echo ""
 
 echo ">>> ${C_PURPLE}Done!${C_RESET}"
-echo " |- ${C_PURPLE}hydra-server${C_RESET} and ${C_PURPLE}hydra-container${C_RESET} built successfully"
+echo " |- ${C_PURPLE}hydra-server${C_RESET} and ${C_PURPLE}hydrad${C_RESET} built successfully"
 
 # only ask to run if running in a terminal
 if [ -t 0 ] ; then

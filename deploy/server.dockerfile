@@ -5,7 +5,7 @@ WORKDIR /usr/src/hydra
 RUN apk add --no-cache musl-dev
 
 RUN mkdir crates \
-    && cargo new --bin crates/hydra-container \
+    && cargo new --bin crates/hydrad \
     && cargo new --bin crates/hydra-server \
     && cargo new --bin crates/hydra-proxy \
     && cargo new --lib crates/shared
@@ -14,7 +14,7 @@ COPY Cargo.toml Cargo.lock ./
 
 # Copy the Cargo.toml files into the image and compile only the dependencies
 # storing them in a layer that we can cache and reuse
-COPY crates/hydra-container/Cargo.toml crates/hydra-container/Cargo.toml
+COPY crates/hydrad/Cargo.toml crates/hydrad/Cargo.toml
 COPY crates/hydra-server/Cargo.toml crates/hydra-server/Cargo.toml
 COPY crates/hydra-proxy/Cargo.toml crates/hydra-proxy/Cargo.toml
 COPY crates/shared/Cargo.toml crates/shared/Cargo.toml

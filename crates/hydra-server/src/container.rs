@@ -91,11 +91,11 @@ impl Container {
         let create_response = DOCKER
             .create_container(
                 Some(container::CreateContainerOptions {
-                    name: format!("hydra-container--tck-{id}"),
+                    name: format!("hydrad--tck-{id}"),
                     ..Default::default()
                 }),
                 container::Config {
-                    image: Some("hydra-container"),
+                    image: Some("hydrad"),
                     host_config: Some(HostConfig {
                         binds: Some(vec![format!(
                             "{}:/run/hydra",
