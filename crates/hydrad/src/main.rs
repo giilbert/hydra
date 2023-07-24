@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
     let addr = "/run/hydra/conn.sock";
     let stream = UnixStream::connect(addr).await?;
     let (ws_stream, _) = client_async("ws://localhost:0000", stream).await?;
-    log::info!("Successfully connected to {}", addr);
+    log::info!("hydrad successfully connected to {}", addr);
 
     let commands = Commands::new(ws_stream);
     commands.run().await?;

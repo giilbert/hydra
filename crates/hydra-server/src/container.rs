@@ -95,7 +95,7 @@ impl Container {
                     ..Default::default()
                 }),
                 container::Config {
-                    image: Some("hydrad"),
+                    image: Some("hydra-python3"),
                     host_config: Some(HostConfig {
                         binds: Some(vec![format!(
                             "{}:/run/hydra",
@@ -109,7 +109,7 @@ impl Container {
                         memory: Some(Config::global().docker.memory.try_into()?),
                         ..Default::default()
                     }),
-                    env: Some(vec!["RUST_LOG=hydra_container=info"]),
+                    env: Some(vec!["RUST_LOG=hydrad=info"]),
                     ..Default::default()
                 },
             )

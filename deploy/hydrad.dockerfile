@@ -37,10 +37,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # hydrad
 FROM debian:buster-slim
-RUN apt-get update \
-    && apt-get install -y python3 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /bin/hydrad /bin/hydrad
 ENV ENVIRONMENT=production
 CMD ["/bin/hydrad"]
