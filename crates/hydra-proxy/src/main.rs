@@ -1,3 +1,4 @@
+mod error_page;
 mod handler;
 mod websocket;
 

@@ -1,4 +1,6 @@
-use crate::websocket::accept_websocket_connection;
+use std::f32::consts::E;
+
+use crate::{error_page::ErrorPage, websocket::accept_websocket_connection};
 use axum::{
     async_trait,
     body::Bytes,
@@ -30,7 +32,7 @@ pub async fn handler(
     // Host(host): Host,
     mut headers: HeaderMap,
     body: Bytes,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ErrorPage> {
     let is_websocket_upgrade = headers
         .get("Upgrade")
         .map(|v| v == "websocket")
@@ -41,17 +43,25 @@ pub async fn handler(
 
     headers.insert(
         "X-Hydra-URI",
-        HeaderValue::from_str(&uri.to_string()).map_err(|_| StatusCode::BAD_REQUEST)?,
+        HeaderValue::from_str(&uri.to_string())
+            .map_err(|_| ErrorPage::error("Something went wrong."))?,
     );
 
     if is_websocket_upgrade {
-        // TODO: handle errors
         if custom_extract.method != Method::GET {
-            panic!("method not a get");
+            return Err(ErrorPage::bad_request(
+                "WebSocket upgrade must be GET request.",
+            ));
         }
 
-        let sec_websocket_key = headers.get(header::SEC_WEBSOCKET_KEY).unwrap().clone();
-        let on_upgrade = custom_extract.on_upgrade.take().unwrap();
+        let sec_websocket_key = headers
+            .get(header::SEC_WEBSOCKET_KEY)
+            .ok_or_else(|| ErrorPage::bad_request("Missing Sec-WebSocket-Key header."))?
+            .clone();
+        let on_upgrade = custom_extract
+            .on_upgrade
+            .take()
+            .ok_or_else(|| ErrorPage::error("Something went wrong."))?;
 
         let config = WebSocketConfig {
             ..Default::default()
@@ -82,10 +92,7 @@ pub async fn handler(
             header::SEC_WEBSOCKET_ACCEPT,
             sign(sec_websocket_key.as_bytes()),
         );
-        response_headers.insert(
-            "X-Forwarded-By",
-            HeaderValue::from_str("hydra-proxy").unwrap(),
-        );
+        response_headers.insert("X-Forwarded-By", HeaderValue::from_static("hydra-proxy"));
 
         return Ok((
             StatusCode::SWITCHING_PROTOCOLS,
@@ -100,25 +107,22 @@ pub async fn handler(
         .headers(headers)
         .body(body)
         .build()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| ErrorPage::error("Error constructing forwarded request."))?;
 
     let response = client
         .execute(request)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| ErrorPage::bad_gateway("Error handling request."))?;
 
     let mut response_headers = response.headers().clone();
     // TODO: check that the content length is below BODY_LIMIT
     let status_code = response.status();
     let response_bytes = response.bytes().await.map_err(|e| {
         log::error!("error decoding response body: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
+        ErrorPage::error("Error decoding response body")
     })?;
 
-    response_headers.insert(
-        "X-Forwarded-By",
-        HeaderValue::from_str("hydra-proxy").unwrap(),
-    );
+    response_headers.insert("X-Forwarded-By", HeaderValue::from_static("hydra-proxy"));
 
     Ok((status_code, response_headers, response_bytes))
 }
