@@ -46,6 +46,7 @@ RUN chmod +x /server-entrypoint.sh
 
 ENV RUST_LOG=info
 ENV RUST_BACKTRACE=1
+ENV DOCKER_HOST=unix:///var/run/docker.sock
 EXPOSE 3100
 
 COPY --from=builder /bin/hydra-server /bin/hydra-server

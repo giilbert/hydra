@@ -10,7 +10,7 @@ services:
     privileged: true
     environment:
       - ENVIRONMENT=development
-      - DOCKER_HOST=unix:///var/run/docker.sock
+      - REDIS_URL=redis://redis:6379
     tty: true
     ports:
       - "3100:3100"
@@ -18,3 +18,14 @@ services:
       - type: bind
         source: ./test-config/config.toml
         target: /etc/hydra/config.toml
+    networks:
+      - hydra
+  redis:
+    container_name: redis
+    image: redis
+    networks:
+      - hydra
+
+networks:
+  hydra:
+    driver: bridge

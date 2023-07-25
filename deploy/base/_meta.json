@@ -1,0 +1,12 @@
+[
+  {
+    "name": "python3",
+    "dockerfile": "python3.dockerfile",
+    "command": "python3"
+  },
+  {
+    "name": "node18",
+    "dockerfile": "node18.dockerfile",
+    "command": "node"
+  }
+]
