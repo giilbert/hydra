@@ -1,5 +1,6 @@
 mod commands;
 mod procedures;
+mod proxy;
 mod pty;
 mod state;
 

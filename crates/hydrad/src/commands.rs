@@ -1,17 +1,13 @@
-use crate::{procedures::handle_rpc_procedure, state::State};
+use crate::{procedures::handle_rpc_procedure, proxy::make_proxy_request, state::State};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use reqwest::{
-    header::{HeaderMap, HeaderName},
-    Method,
-};
 use shared::{
     prelude::*,
-    protocol::{ContainerProxyRequest, ContainerProxyResponse, ContainerSent, HostSent},
+    protocol::{ContainerSent, HostSent},
 };
-use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::{
     net::UnixStream,
     sync::{mpsc, Mutex},
@@ -105,7 +101,7 @@ impl Commands {
 
                     log::debug!("Sent RPC response: {:?}", res);
                 }
-                HostSent::ProxyRequest(req_id, req) => {
+                HostSent::ProxyHTTPRequest(req_id, req) => {
                     log::info!("Received proxy request: {:?}", req);
                     let proxy_response = make_proxy_request(req).await;
                     log::info!("Proxy response: {:?}", proxy_response);
@@ -127,42 +123,4 @@ impl Commands {
 
         Ok(())
     }
-}
-
-async fn make_proxy_request(req: ContainerProxyRequest) -> Result<ContainerProxyResponse, String> {
-    let method = Method::try_from(req.method.as_str()).map_err(|e| e.to_string())?;
-    let url = format!("http://localhost:{}", req.port);
-    let mut headers = HeaderMap::new();
-
-    for (k, v) in req.headers {
-        headers.insert(
-            HeaderName::from_str(&k).map_err(|_| "Error parsing header name")?,
-            v.parse().map_err(|_| "Error parsing header value")?,
-        );
-    }
-
-    log::debug!("Making request: {} {}", method, url);
-
-    // FIXME: THE LINE BELOW SEGFAULTS
-    let client = reqwest::Client::new();
-    let response = client
-        .request(method, url)
-        .headers(headers)
-        .body(req.body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let container_response = ContainerProxyResponse {
-        status_code: response.status().as_u16(),
-        headers: response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
-            .collect::<HashMap<_, _>>(),
-        // TODO: no-copy
-        body: response.bytes().await.map_err(|e| e.to_string())?.to_vec(),
-    };
-
-    Ok(container_response)
 }

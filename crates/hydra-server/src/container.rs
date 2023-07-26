@@ -255,7 +255,7 @@ impl Container {
 
         log::debug!("[{}]: sent proxy request", self.display_id);
         self.commands_tx
-            .send(ContainerCommands::SendMessage(HostSent::ProxyRequest(
+            .send(ContainerCommands::SendMessage(HostSent::ProxyHTTPRequest(
                 id, req,
             )))
             .await?;

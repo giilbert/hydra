@@ -31,7 +31,7 @@ pub enum ContainerSent {
 #[serde(tag = "type", content = "data")]
 pub enum HostSent {
     RpcRequest { id: Uuid, req: ContainerRpcRequest },
-    ProxyRequest(Uuid, ContainerProxyRequest),
+    ProxyHTTPRequest(Uuid, ContainerProxyRequest),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
