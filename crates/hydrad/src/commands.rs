@@ -25,7 +25,7 @@ pub struct Commands {
     ws_rx: SplitStream<WebSocketStream<UnixStream>>,
     commands_rx: mpsc::Receiver<Command>,
     pub commands_tx: mpsc::Sender<Command>,
-    state: Arc<Mutex<State>>,
+    state: Arc<State>,
 }
 
 impl Commands {
@@ -34,7 +34,7 @@ impl Commands {
         let (commands_tx, commands_rx) = mpsc::channel(512);
 
         Self {
-            state: Arc::new(Mutex::new(State::new(commands_tx.clone()))),
+            state: Arc::new(State::new(commands_tx.clone())),
             ws_tx,
             ws_rx,
             commands_rx,
@@ -53,7 +53,7 @@ impl Commands {
                         }
                     }
                     Command::RemovePty(id) => {
-                        state.lock().await.remove_pty(id);
+                        state.remove_pty(id);
                     }
                 }
             }

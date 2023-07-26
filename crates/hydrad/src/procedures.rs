@@ -3,15 +3,12 @@ use portable_pty::CommandBuilder;
 use serde_json::{json, Value};
 use shared::{prelude::*, protocol::ContainerRpcRequest};
 use std::{path::PathBuf, sync::Arc};
-use tokio::{
-    fs,
-    sync::{mpsc, Mutex},
-};
+use tokio::{fs, sync::mpsc};
 
 pub async fn handle_rpc_procedure(
     commands: &mpsc::Sender<Command>,
     req: ContainerRpcRequest,
-    state: Arc<Mutex<State>>,
+    state: Arc<State>,
 ) -> Result<Result<Value, String>> {
     log::debug!("Got RPC: {:?}", req);
 
@@ -23,7 +20,7 @@ pub async fn handle_rpc_procedure(
             }
 
             let pty = pty::create(cmd).await?;
-            let id = state.lock().await.register_pty(pty.commands_tx.clone());
+            let id = state.register_pty(pty.commands_tx.clone());
 
             tokio::spawn(pty.send_output(commands.clone()));
 
@@ -31,7 +28,6 @@ pub async fn handle_rpc_procedure(
         }
         ContainerRpcRequest::PtyInput { id, input } => {
             // panic!();
-            let mut state = state.lock().await;
             let pty = state.get_pty(id).ok_or_else(|| eyre!("cannot find pty"))?;
 
             pty.send(pty::PtyCommands::Input(pty::PtyInput::Text(
