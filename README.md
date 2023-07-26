@@ -1,5 +1,9 @@
 # hydra
 
+### TODOs:
+
+- Refactor states to use Redis connection pooling
+
 Sandboxed code execution. _with a terminal_
 
 ---

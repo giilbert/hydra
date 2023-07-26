@@ -1,19 +1,22 @@
-use std::f32::consts::E;
-
-use crate::{error_page::ErrorPage, websocket::accept_websocket_connection};
+use crate::{
+    discovery::resolve_server_url, error_page::ErrorPage, websocket::accept_websocket_connection,
+    AppState,
+};
 use axum::{
     async_trait,
     body::Bytes,
-    extract::FromRequestParts,
+    extract::{FromRequestParts, Host, State},
     http::{request::Parts, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     response::IntoResponse,
 };
 use hyper::{header, upgrade::OnUpgrade};
 use sha1::{Digest, Sha1};
+use std::sync::Arc;
 use tokio_tungstenite::{
     tungstenite::protocol::{Role, WebSocketConfig},
     WebSocketStream,
 };
+use uuid::Uuid;
 
 fn sign(key: &[u8]) -> HeaderValue {
     use base64::engine::Engine as _;
@@ -27,9 +30,10 @@ fn sign(key: &[u8]) -> HeaderValue {
 
 #[axum::debug_handler]
 pub async fn handler(
+    app_state: State<Arc<AppState>>,
     mut custom_extract: CustomExtract,
     uri: Uri,
-    // Host(host): Host,
+    Host(host): Host,
     mut headers: HeaderMap,
     body: Bytes,
 ) -> Result<impl IntoResponse, ErrorPage> {
@@ -38,8 +42,14 @@ pub async fn handler(
         .map(|v| v == "websocket")
         .unwrap_or(false);
 
-    let hydra_server_url = "http://localhost:3100";
-    let proxy_url = format!("{hydra_server_url}/proxy");
+    let ParsedHost { session_id } = ParsedHost::parse(host)?;
+
+    let proxy_url = resolve_server_url(&app_state, &session_id)
+        .await
+        .map_err(|e| {
+            log::error!("error resolving server url: {e}");
+            ErrorPage::error("Something went wrong.")
+        })?;
 
     headers.insert(
         "X-Hydra-URI",
@@ -107,12 +117,15 @@ pub async fn handler(
         .headers(headers)
         .body(body)
         .build()
-        .map_err(|_| ErrorPage::error("Error constructing forwarded request."))?;
+        .map_err(|e| {
+            log::error!("error constructing forwarded request: {e}");
+            ErrorPage::error("Error constructing forwarded request.")
+        })?;
 
     let response = client
         .execute(request)
         .await
-        .map_err(|_| ErrorPage::bad_gateway("Error handling request."))?;
+        .map_err(|_| ErrorPage::bad_gateway("Error handling request. Is your program online?"))?;
 
     let mut response_headers = response.headers().clone();
     // TODO: check that the content length is below BODY_LIMIT
@@ -143,5 +156,27 @@ impl<S> FromRequestParts<S> for CustomExtract {
             method: parts.method.clone(),
             on_upgrade,
         })
+    }
+}
+
+struct ParsedHost {
+    pub session_id: Uuid,
+}
+
+impl ParsedHost {
+    pub fn parse(host: String) -> Result<ParsedHost, ErrorPage> {
+        let bad_option = || ErrorPage::bad_request("Invalid host header.");
+        let bad_result = |_| ErrorPage::bad_request("Invalid host header.");
+
+        let subdomain = host.split('.').next().ok_or_else(bad_option)?.to_string();
+        let parts = subdomain.split("--").collect::<Vec<_>>();
+
+        let session_id = parts
+            .get(0)
+            .ok_or_else(bad_option)?
+            .parse::<Uuid>()
+            .map_err(bad_result)?;
+
+        Ok(ParsedHost { session_id })
     }
 }

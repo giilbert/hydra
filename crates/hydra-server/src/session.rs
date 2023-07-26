@@ -124,7 +124,7 @@ impl Session {
                 .redis
                 .write()
                 .await
-                .del(format!("session-{}", ticket))
+                .del(format!("session:{}", ticket))
                 .await
                 .expect("redis error while deleting session");
 
@@ -233,7 +233,7 @@ impl Session {
             .redis
             .write()
             .await
-            .set(format!("session-{}", self.ticket), machine_ip)
+            .set(format!("session:{}", self.ticket), machine_ip)
             .await?;
 
         let this = Arc::new(self);
