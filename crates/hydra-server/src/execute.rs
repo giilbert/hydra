@@ -75,7 +75,7 @@ pub async fn execute_headless(
     }
 
     let mut container_req = app_state.container_pool.take_one().await;
-    let mut container = container_req
+    let container = container_req
         .recv()
         .await
         .ok_or_else(|| ErrorResponse::error("Error receiving container"))?;

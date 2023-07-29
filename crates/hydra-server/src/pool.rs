@@ -9,7 +9,7 @@ use std::{
 };
 use tokio::sync::{mpsc, Notify, RwLock};
 
-type Queue = Arc<RwLock<VecDeque<mpsc::Sender<Container>>>>;
+type Queue = Arc<RwLock<VecDeque<mpsc::Sender<Arc<Container>>>>>;
 
 static CONTAINER_QUEUE_NOTIFY: Notify = Notify::const_new();
 static CREATING_CONTAINER_COUNT: AtomicI32 = AtomicI32::new(0);
@@ -18,14 +18,14 @@ static CREATING_CONTAINER_COUNT: AtomicI32 = AtomicI32::new(0);
 pub struct ContainerPool {
     pub deletion_tx: tokio::sync::mpsc::Sender<String>,
     // mapping docker id to Container
-    containers: Arc<RwLock<HashMap<String, Container>>>,
+    containers: Arc<RwLock<HashMap<String, Arc<Container>>>>,
     queue: Queue,
 }
 
 impl ContainerPool {
     pub async fn new(pool_size: u32) -> Self {
         let (deletion_tx, mut deletion_rx) = mpsc::channel(500);
-        let containers = Arc::<RwLock<HashMap<String, Container>>>::default();
+        let containers = Arc::<RwLock<HashMap<String, Arc<Container>>>>::default();
 
         let containers_clone = containers.clone();
         let deletion_tx_clone = deletion_tx.clone();
@@ -119,7 +119,7 @@ impl ContainerPool {
         }
     }
 
-    pub async fn take_one(&self) -> mpsc::Receiver<Container> {
+    pub async fn take_one(&self) -> mpsc::Receiver<Arc<Container>> {
         let (sender, receiver) = mpsc::channel(1);
         self.queue.write().await.push_back(sender);
         CONTAINER_QUEUE_NOTIFY.notify_waiters();

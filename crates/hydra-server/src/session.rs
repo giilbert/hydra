@@ -12,7 +12,7 @@ use shared::{
 };
 use std::sync::Arc;
 use tokio::{
-    sync::{mpsc, oneshot, Mutex, RwLock},
+    sync::{mpsc, oneshot, Mutex},
     task::JoinHandle,
 };
 use uuid::Uuid;
@@ -60,7 +60,7 @@ pub struct Session {
     proxy_rx: Arc<Mutex<Option<mpsc::Receiver<ProxyPayload>>>>,
     websocket_connections_request_rx:
         Arc<Mutex<Option<mpsc::Receiver<WebSocketConnectionRequest>>>>,
-    container: Arc<RwLock<Container>>,
+    container: Arc<Container>,
     self_destruct_timer: Mutex<Option<JoinHandle<()>>>,
     app_state: AppState,
 }
@@ -114,7 +114,7 @@ impl Session {
             websocket_connections_request_rx: Arc::new(Mutex::new(Some(
                 websocket_connections_request_rx,
             ))),
-            container: Arc::new(RwLock::new(container)),
+            container,
             self_destruct_timer: Mutex::new(None),
             app_state,
         })
@@ -142,7 +142,7 @@ impl Session {
             }
 
             app_state.sessions.write().await.remove(&ticket);
-            let _ = container.write().await.stop().await;
+            let _ = container.stop().await;
         }));
     }
 
@@ -165,11 +165,10 @@ impl Session {
             }
         };
 
-        let container = self.container.read().await;
-
         match data {
             ClientMessage::PtyInput { id, input } => {
-                if let Err(err) = container
+                if let Err(err) = self
+                    .container
                     .rpc(ContainerRpcRequest::PtyInput { id, input })
                     .await?
                 {
@@ -177,7 +176,8 @@ impl Session {
                 }
             }
             ClientMessage::Run => {
-                if let Err(err) = container
+                if let Err(err) = self
+                    .container
                     .rpc(ContainerRpcRequest::PtyCreate {
                         command: "python3".to_string(),
                         arguments: vec!["main.py".to_string()],
@@ -188,7 +188,7 @@ impl Session {
                 }
             }
             ClientMessage::Crash => {
-                if let Err(err) = container.rpc(ContainerRpcRequest::Crash).await? {
+                if let Err(err) = self.container.rpc(ContainerRpcRequest::Crash).await? {
                     log::error!("Crash error: {}", err);
                 }
             }
@@ -228,7 +228,7 @@ impl Session {
     }
 
     pub async fn handle_websocket_connection(mut self, ws: WebSocket) -> Result<()> {
-        let mut stop_rx = self.container.read().await.on_stop();
+        let mut stop_rx = self.container.on_stop();
         self.cancel_self_destruct().await;
 
         let machine_ip = if std::env::var("FLY_PRIVATE_IP").is_ok() {
@@ -250,12 +250,7 @@ impl Session {
         let (mut messages_tx, mut messages_rx) = mpsc::channel::<Message>(100);
         let (ws_tx, mut ws_rx) = ws.split();
 
-        let mut container_rx = this
-            .container
-            .write()
-            .await
-            .listen()
-            .expect("container already taken");
+        let mut container_rx = this.container.listen().expect("container already taken");
 
         // this task handles messages from the container
         let display_id_clone = this.display_id.clone();
@@ -287,8 +282,6 @@ impl Session {
                         // TODO: handle error
                         let response = match this_clone
                             .container
-                            .read()
-                            .await
                             .proxy_request(req)
                             .await {
                                 Ok(response) => response,
@@ -323,8 +316,6 @@ impl Session {
                         log::info!("got request: {request:?}");
                         let response = match this_clone
                             .container
-                            .read()
-                            .await
                             .create_websocket_connection(request.proxy_request)
                             .await {
                                 Ok(response) => response,
@@ -395,7 +386,7 @@ impl Session {
 
         log::debug!("[{}] Closing websocket", this.display_id);
 
-        if let Err(e) = this.container.read().await.stop().await {
+        if let Err(e) = this.container.stop().await {
             log::error!(
                 "[{}] Error trying to stop container: {}",
                 this.display_id,

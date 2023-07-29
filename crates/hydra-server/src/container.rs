@@ -1,8 +1,6 @@
 use crate::{
     config::Config,
-    proxy_websockets::{
-        WebSocketConnection, WebSocketConnectionCommands, WebSocketConnectionRequest,
-    },
+    proxy_websockets::{WebSocketConnection, WebSocketConnectionCommands},
     rpc::RpcRecords,
     shutdown, Environment,
 };
@@ -64,10 +62,15 @@ pub struct Container {
 
     /// An event that is fired when the container is stopped
     stop_rx: watch::Receiver<()>,
+    stop_tx: watch::Sender<()>,
 
-    container_rx: Option<mpsc::Receiver<ContainerSent>>,
-    deletion_tx: Option<mpsc::Sender<String>>,
+    // used for bidirectional communication between the container and connected client
+    container_rx: parking_lot::Mutex<Option<mpsc::Receiver<ContainerSent>>>,
+    container_tx: mpsc::Sender<ContainerSent>,
+
     commands_tx: mpsc::Sender<ContainerCommands>,
+
+    deletion_tx: Option<mpsc::Sender<String>>,
     /// Keeps track of RPC calls and is used for responses
     rpc_records: Arc<Mutex<RpcRecords<Value>>>,
     /// Keeps track of proxy requests and is used for responses
@@ -85,7 +88,7 @@ pub enum ContainerCommands {
 }
 
 impl Container {
-    pub async fn new(deletion_tx: Option<mpsc::Sender<String>>) -> Result<Self> {
+    pub async fn new(deletion_tx: Option<mpsc::Sender<String>>) -> Result<Arc<Self>> {
         let id = Uuid::new_v4();
         let hydra_run_dir = if Environment::get() == Environment::Production {
             PathBuf::from("/run/hydra")
@@ -162,23 +165,8 @@ impl Container {
             format!("dok-{}", &create_response.id[0..5]),
             stop_rx.clone(),
         ));
-        tokio::spawn(Container::run(
-            create_response.id.clone(),
-            ws_stream,
-            container_commands_rx,
-            container_commands_tx.clone(),
-            rpc_records.clone(),
-            proxy_records.clone(),
-            websocket_connection_request_records.clone(),
-            websocket_connections.clone(),
-            container_message_tx,
-            container_socket_dir.clone(),
-            stop_tx,
-            stop_rx.clone(),
-            deletion_tx.clone(),
-        ));
 
-        Ok(Self {
+        let container = Arc::new(Self {
             _id: id,
             docker_id: create_response.id,
             display_id,
@@ -187,16 +175,23 @@ impl Container {
             rpc_records,
             proxy_records,
             socket_dir: container_socket_dir,
-            container_rx: Some(container_message_rx),
+            container_rx: parking_lot::Mutex::new(Some(container_message_rx)),
+            container_tx: container_message_tx,
             stop_rx,
+            stop_tx,
             stopped: false.into(),
             websocket_connection_request_records,
             websocket_connections,
-        })
+        });
+
+        tokio::spawn(container.clone().run(ws_stream, container_commands_rx));
+
+        Ok(container)
     }
 
-    pub fn listen(&mut self) -> Result<mpsc::Receiver<ContainerSent>> {
+    pub fn listen(&self) -> Result<mpsc::Receiver<ContainerSent>> {
         self.container_rx
+            .lock()
             .take()
             .ok_or(eyre!("container already listened to"))
     }
@@ -352,52 +347,55 @@ impl Container {
         }
     }
 
-    async fn handle_message(
-        msg: ContainerSent,
-        commands: &mpsc::Sender<ContainerCommands>,
-        stop_rx: &StopRx,
-        rpc_records: &Mutex<RpcRecords<Value>>,
-        proxy_records: &Mutex<RpcRecords<ContainerProxyResponse>>,
-        websocket_connection_records: &Mutex<RpcRecords<WebSocketConnection>>,
-        websocket_connections: &RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>,
-        container_tx: &mpsc::Sender<ContainerSent>,
-        logging_id: &str,
-    ) -> Result<()> {
+    async fn handle_message(&self, msg: ContainerSent) -> Result<()> {
         match msg {
             ContainerSent::RpcResponse { id, result } => {
                 let response = serde_json::from_str::<Result<Value, String>>(&result)
                     .expect("serde_json deserialize error");
                 log::debug!("Got rpc response: {:#?}", response);
-                let mut rpc_records = rpc_records.lock().await;
+                let mut rpc_records = self.rpc_records.lock().await;
                 log::debug!("Handling rpc response");
                 if let Err(err) = rpc_records.handle_incoming(id, response) {
-                    log::error!("[{logging_id}] Error handling rpc response: {err:#?}");
+                    log::error!(
+                        "[{}] Error handling rpc response: {err:#?}",
+                        self.display_id
+                    );
                 };
             }
             ContainerSent::ProxyResponse { req_id, response } => {
                 // log::debug!("Got rpc response: {:#?}", response);
-                let mut proxy_records = proxy_records.lock().await;
+                let mut proxy_records = self.proxy_records.lock().await;
                 // log::debug!("Handling proxy response");
                 if let Err(err) = proxy_records.handle_incoming(req_id, response) {
-                    log::error!("[{logging_id}] Error handling proxy response: {err:#?}");
+                    log::error!(
+                        "[{}] Error handling proxy response: {err:#?}",
+                        self.display_id
+                    );
                 };
             }
             ContainerSent::WebSocketConnectionResponse { req_id, id } => {
-                let connection = WebSocketConnection::new(id, stop_rx.clone(), commands.clone());
+                let connection =
+                    WebSocketConnection::new(id, self.stop_rx.clone(), self.commands_tx.clone());
                 let container_tx = connection.container_tx.clone();
 
-                websocket_connections.write().await.insert(id, container_tx);
-                let mut websocket_connection_records = websocket_connection_records.lock().await;
+                self.websocket_connections
+                    .write()
+                    .await
+                    .insert(id, container_tx);
+                let mut websocket_connection_request_records =
+                    self.websocket_connection_request_records.lock().await;
                 if let Err(err) =
-                    websocket_connection_records.handle_incoming(req_id, Ok(connection))
+                    websocket_connection_request_records.handle_incoming(req_id, Ok(connection))
                 {
                     log::error!(
-                        "[{logging_id}] Error handling websocket connection response: {err:#?}"
+                        "[{}] Error handling websocket connection response: {err:#?}",
+                        self.display_id
                     );
                 };
             }
             ContainerSent::WebSocketMessage { id, message } => {
-                let _ = websocket_connections
+                let _ = self
+                    .websocket_connections
                     .read()
                     .await
                     .get(&id)
@@ -405,28 +403,17 @@ impl Container {
                     .send(WebSocketConnectionCommands::Send(message.into()))
                     .await;
             }
-            _ => container_tx.send(msg).await?,
+            _ => self.container_tx.send(msg).await?,
         }
 
         Ok(())
     }
 
     async fn run_event_loop(
+        &self,
         container_ws_rx: &mut SplitStream<WebSocketStream<UnixStream>>,
         container_ws_tx: &mut SplitSink<WebSocketStream<UnixStream>, Message>,
-
-        rpc_records: Arc<Mutex<RpcRecords<Value>>>,
-        proxy_records: Arc<Mutex<RpcRecords<ContainerProxyResponse>>>,
-        websocket_connection_records: Arc<Mutex<RpcRecords<WebSocketConnection>>>,
-        websocket_connections: Arc<RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>>,
-
         commands_rx: &mut mpsc::Receiver<ContainerCommands>,
-        commands_tx: &mpsc::Sender<ContainerCommands>,
-
-        container_tx: &mpsc::Sender<ContainerSent>,
-        stop_rx: StopRx,
-
-        logging_id: &str,
     ) -> Result<()> {
         loop {
             tokio::select! {
@@ -439,42 +426,34 @@ impl Container {
 
                             match &msg {
                                 ContainerSent::PtyOutput { .. } => (),
-                                msg => log::debug!("[{logging_id}] Got message: {:#?}", msg)
+                                msg => log::debug!("[{}] Got message: {msg:#?}", self.display_id)
                             }
 
-                            Container::handle_message(
+                            self.handle_message(
                                 msg,
-                                &commands_tx,
-                                &stop_rx,
-                                &rpc_records,
-                                &proxy_records,
-                                &websocket_connection_records,
-                                &websocket_connections,
-                                &container_tx,
-                                &logging_id,
                             )
                             .await?;
                         }
                         Err(e) => {
-                            log::error!("[{logging_id}] Container WebSocket unexpectedly hung up: {}", e);
+                            log::error!("[{}] Container WebSocket unexpectedly hung up: {e:#?}", self.display_id);
                             break;
                         }
-                        _ => log::warn!("[{logging_id}] Got unexpected message: {:#?}", msg)
+                        _ => log::warn!("[{}] Got unexpected message: {msg:#?}", self.display_id),
                     }
                 }
                 Some(msg) = commands_rx.recv() => {
                     match msg {
                         ContainerCommands::SendMessage(msg) => {
                             let bin = rmp_serde::to_vec_named(&msg).expect("rmp serde serialize error");
-                            log::debug!("[{logging_id}] Sending message: {:#?}", msg);
+                            log::debug!("[{}] Sending message: {msg:#?}", self.display_id);
                             container_ws_tx.send(Message::Binary(bin)).await?;
-                            log::debug!("[{logging_id}] Sent message: {:#?}", msg);
+                            log::debug!("[{}] Sent message: {msg:#?}", self.display_id);
                         }
                         ContainerCommands::RemoveWebSocketConnection(id) => {
-                            websocket_connections.write().await.remove(&id);
+                            self.websocket_connections.write().await.remove(&id);
                         }
                         ContainerCommands::Stop => {
-                            log::info!("[{logging_id}]: 1,1. received stop command, exiting event loop");
+                            log::info!("[{}]: 1,1. received stop command, exiting event loop", self.display_id);
                             break;
                         }
                     }
@@ -486,19 +465,9 @@ impl Container {
     }
 
     async fn run(
-        container_id: String,
+        self: Arc<Self>,
         ws_stream: WebSocketStream<UnixStream>,
         mut commands_rx: mpsc::Receiver<ContainerCommands>,
-        commands_tx: mpsc::Sender<ContainerCommands>,
-        rpc_records: Arc<Mutex<RpcRecords<Value>>>,
-        proxy_records: Arc<Mutex<RpcRecords<ContainerProxyResponse>>>,
-        websocket_connection_records: Arc<Mutex<RpcRecords<WebSocketConnection>>>,
-        websocket_connections: Arc<RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>>,
-        container_tx: mpsc::Sender<ContainerSent>,
-        socket_dir: PathBuf,
-        stop_tx: watch::Sender<()>,
-        stop_rx: StopRx,
-        deletion_tx: Option<mpsc::Sender<String>>,
     ) -> Result<()> {
         // reading stop messages:
         // eg 1,0. message
@@ -506,23 +475,12 @@ impl Container {
         // second number - optional numbers
 
         let (mut container_ws_tx, mut container_ws_rx) = ws_stream.split();
-        let logging_id = format!("dok-{}", &container_id[0..5]);
+        let logging_id = self.display_id.clone();
 
         // this event loop exits when stop is fired or when the container websocket closes
-        if let Err(e) = Container::run_event_loop(
-            &mut container_ws_rx,
-            &mut container_ws_tx,
-            rpc_records,
-            proxy_records,
-            websocket_connection_records,
-            websocket_connections,
-            &mut commands_rx,
-            &commands_tx,
-            &container_tx,
-            stop_rx,
-            &logging_id,
-        )
-        .await
+        if let Err(e) = self
+            .run_event_loop(&mut container_ws_rx, &mut container_ws_tx, &mut commands_rx)
+            .await
         {
             log::error!(
                 "[{logging_id}] Error running container event loop: {:#?}. Cleaning up container.",
@@ -532,7 +490,7 @@ impl Container {
 
         log::info!("[{logging_id}]: 2. broadcasting stop");
         // this notifies all other tasks
-        let _ = stop_tx.send(());
+        let _ = self.stop_tx.send(());
 
         let mut ws_stream = container_ws_tx
             .reunite(container_ws_rx)
@@ -541,13 +499,13 @@ impl Container {
 
         log::info!("[{logging_id}]: 3. closed container websocket");
 
-        fs::remove_dir_all(&socket_dir)
+        fs::remove_dir_all(&self.socket_dir)
             .await
             .expect("Error removing socket dir");
 
         log::info!("[{logging_id}]: 4. removing container socket directory");
 
-        let res = DOCKER.inspect_container(&container_id, None).await?;
+        let res = DOCKER.inspect_container(&self.docker_id, None).await?;
         let state = res.state.map(|state| state.status).flatten();
 
         if state
@@ -561,7 +519,7 @@ impl Container {
 
             if let Err(err) = DOCKER
                 .remove_container(
-                    &container_id,
+                    &self.docker_id,
                     Some(bollard::container::RemoveContainerOptions {
                         force: true,
                         ..Default::default()
@@ -575,9 +533,9 @@ impl Container {
 
         log::info!("[{logging_id}]: 5,1 removed docker container, exiting");
 
-        if let Some(deletion_tx) = deletion_tx {
+        if let Some(deletion_tx) = self.deletion_tx.clone() {
             // notify the deletion task that this container is done and deleted
-            deletion_tx.send(container_id).await?;
+            deletion_tx.send(self.display_id.clone()).await?;
         }
 
         Ok(())
