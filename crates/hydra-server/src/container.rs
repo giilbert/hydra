@@ -95,7 +95,7 @@ impl Container {
             PathBuf::from("/tmp/hydra")
         };
         let container_socket_dir = hydra_run_dir.join(format!("sockets/{}", id));
-        let (stop_tx, stop_rx) = watch::channel(());
+        let (stop_tx, mut stop_rx) = watch::channel(());
 
         fs::create_dir_all(&container_socket_dir).await?;
 
@@ -140,13 +140,30 @@ impl Container {
             .start_container::<String>(&create_response.id, None)
             .await?;
 
-        // FIXME: error if container does not connect after some time
-        let ws_stream = match listener.accept().await {
-            Ok((stream, _)) => accept_async(stream).await?,
-            Err(e) => {
-                log::error!("[{display_id}] Error during initial WebSocket Connection: {e}",);
+        async fn accept_connection(
+            display_id: String,
+            container_socket_dir: PathBuf,
+            listener: UnixListener,
+        ) -> Result<WebSocketStream<UnixStream>> {
+            match listener.accept().await {
+                Ok((stream, _)) => accept_async(stream).await.map_err(|e| e.into()),
+                Err(e) => {
+                    log::error!("[{display_id}] Error during initial WebSocket Connection: {e}",);
+                    fs::remove_dir_all(&container_socket_dir).await?;
+                    return Err(e.into());
+                }
+            }
+        }
+
+        let ws_stream = tokio::select! {
+            ws_stream = accept_connection(display_id.clone(), container_socket_dir.clone(), listener) => ws_stream?,
+            _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {
                 fs::remove_dir_all(&container_socket_dir).await?;
-                return Err(e.into());
+                return Err(eyre!("container did not connect to websocket within 10 seconds"));
+            }
+            _ = stop_rx.changed() => {
+                fs::remove_dir_all(&container_socket_dir).await?;
+                return Err(eyre!("container stopped before connecting to websocket"));
             }
         };
 
