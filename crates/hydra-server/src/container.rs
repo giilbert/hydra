@@ -58,8 +58,6 @@ pub struct Container {
     pub stopped: AtomicBool,
     pub socket_dir: PathBuf,
 
-    _id: Uuid,
-
     /// An event that is fired when the container is stopped
     stop_rx: watch::Receiver<()>,
     stop_tx: watch::Sender<()>,
@@ -160,14 +158,7 @@ impl Container {
 
         let (container_message_tx, container_message_rx) = mpsc::channel::<ContainerSent>(64);
 
-        tokio::spawn(Container::forward_logs(
-            create_response.id.clone(),
-            format!("dok-{}", &create_response.id[0..5]),
-            stop_rx.clone(),
-        ));
-
         let container = Arc::new(Self {
-            _id: id,
             docker_id: create_response.id,
             display_id,
             deletion_tx,
@@ -184,6 +175,7 @@ impl Container {
             websocket_connections,
         });
 
+        tokio::spawn(container.clone().forward_logs());
         tokio::spawn(container.clone().run(ws_stream, container_commands_rx));
 
         Ok(container)
@@ -320,9 +312,9 @@ impl Container {
         res.map_err(|e| eyre!("container failed to create websocket connection: {:?}", e))
     }
 
-    async fn forward_logs(container_id: String, logging_id: String, mut stop_rx: StopRx) {
+    async fn forward_logs(self: Arc<Self>) {
         let mut log_stream = DOCKER.logs(
-            &container_id,
+            &self.docker_id,
             Some(container::LogsOptions::<String> {
                 follow: true,
                 stdout: true,
@@ -331,18 +323,18 @@ impl Container {
             }),
         );
 
+        let mut stop_rx = self.stop_rx.clone();
+
         loop {
             tokio::select! {
                 Some(Ok(msg)) = log_stream.next() => {
                     log::info!(
                         "[{}] [LOG]: {}",
-                        logging_id,
+                        self.display_id,
                         &msg.to_string().trim_end()
                     );
                 }
-                _ = stop_rx.changed() => {
-                    break;
-                }
+                _ = stop_rx.changed() => break
             }
         }
     }
@@ -429,10 +421,7 @@ impl Container {
                                 msg => log::debug!("[{}] Got message: {msg:#?}", self.display_id)
                             }
 
-                            self.handle_message(
-                                msg,
-                            )
-                            .await?;
+                            self.handle_message(msg).await?;
                         }
                         Err(e) => {
                             log::error!("[{}] Container WebSocket unexpectedly hung up: {e:#?}", self.display_id);
