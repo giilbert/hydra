@@ -97,10 +97,12 @@ impl Container {
         let container_socket_dir = hydra_run_dir.join(format!("sockets/{}", id));
         let (stop_tx, mut stop_rx) = watch::channel(());
 
-        fs::create_dir_all(&container_socket_dir).await?;
+        fs::create_dir_all(&container_socket_dir)
+            .await
+            .expect("unable to create container socket dir");
 
         let addr = format!("{}/conn.sock", container_socket_dir.to_string_lossy());
-        let listener = UnixListener::bind(addr)?;
+        let listener = UnixListener::bind(addr).expect("unable to bind to unix socket");
 
         let create_response = DOCKER
             .create_container(
@@ -120,7 +122,13 @@ impl Container {
                         auto_remove: Some(true),
                         cpu_quota: Some(Config::global().docker.cpu_shares),
                         cpuset_cpus: Some(Config::global().docker.cpu_set.clone()),
-                        memory: Some(Config::global().docker.memory.try_into()?),
+                        memory: Some(
+                            Config::global()
+                                .docker
+                                .memory
+                                .try_into()
+                                .expect("invalid memory in config"),
+                        ),
                         ..Default::default()
                     }),
                     env: Some(vec!["RUST_LOG=hydrad=info"]),
@@ -149,7 +157,9 @@ impl Container {
                 Ok((stream, _)) => accept_async(stream).await.map_err(|e| e.into()),
                 Err(e) => {
                     log::error!("[{display_id}] Error during initial WebSocket Connection: {e}",);
-                    fs::remove_dir_all(&container_socket_dir).await?;
+                    fs::remove_dir_all(&container_socket_dir)
+                        .await
+                        .expect("unable to remove container socket dir");
                     return Err(e.into());
                 }
             }
@@ -158,11 +168,11 @@ impl Container {
         let ws_stream = tokio::select! {
             ws_stream = accept_connection(display_id.clone(), container_socket_dir.clone(), listener) => ws_stream?,
             _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {
-                fs::remove_dir_all(&container_socket_dir).await?;
+                fs::remove_dir_all(&container_socket_dir).await.expect("unable to remove container socket dir");
                 return Err(eyre!("container did not connect to websocket within 10 seconds"));
             }
             _ = stop_rx.changed() => {
-                fs::remove_dir_all(&container_socket_dir).await?;
+                fs::remove_dir_all(&container_socket_dir).await.expect("unable to remove container socket dir");
                 return Err(eyre!("container stopped before connecting to websocket"));
             }
         };

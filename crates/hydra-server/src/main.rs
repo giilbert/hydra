@@ -40,7 +40,7 @@ struct Ports {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    color_eyre::install()?;
+    color_eyre::install().expect("failed to install color_eyre");
     pretty_env_logger::init();
     dotenv::dotenv().ok();
 
