@@ -1,5 +1,5 @@
 use crate::{
-    discovery::resolve_server_url, error_page::ErrorPage, websocket::accept_websocket_connection,
+    discovery::resolve_server_ip, error_page::ErrorPage, websocket::accept_websocket_connection,
     AppState,
 };
 use axum::{
@@ -44,7 +44,7 @@ pub async fn handler(
 
     let ParsedHost { session_id } = ParsedHost::parse(host)?;
 
-    let proxy_url = resolve_server_url(&app_state, &session_id)
+    let proxy_ip = resolve_server_ip(&app_state, &session_id)
         .await
         .map_err(|e| {
             log::error!("error resolving server url: {e}");
@@ -87,6 +87,8 @@ pub async fn handler(
             };
 
             accept_websocket_connection(
+                format!("ws://{proxy_ip}:3100/proxy-websocket"),
+                headers,
                 WebSocketStream::from_raw_socket(upgraded, Role::Server, Some(config)).await,
             )
             .await;
@@ -113,7 +115,10 @@ pub async fn handler(
 
     let client = reqwest::Client::new();
     let request = client
-        .request(custom_extract.method, proxy_url)
+        .request(
+            custom_extract.method,
+            format!("http://{proxy_ip}:3100/proxy"),
+        )
         .headers(headers)
         .body(body)
         .build()

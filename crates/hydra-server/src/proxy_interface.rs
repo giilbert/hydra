@@ -1,18 +1,22 @@
-use crate::AppState;
+use crate::{
+    proxy_websockets::{WebSocketConnection, WebSocketConnectionRequest},
+    AppState,
+};
 use axum::{
     async_trait,
     body::Bytes,
-    extract::{FromRequestParts, Host, State},
+    extract::{FromRequestParts, Host, State, WebSocketUpgrade},
     http::{request::Parts, HeaderMap, HeaderName, Method, StatusCode},
     response::IntoResponse,
 };
+use futures_util::{SinkExt, StreamExt};
 use shared::{protocol::ContainerProxyRequest, ErrorResponse};
 use std::{collections::HashMap, str::FromStr};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 #[axum::debug_handler]
-pub async fn proxy(
+pub async fn proxy_http(
     State(app_state): State<AppState>,
     ExtractMethod(method): ExtractMethod,
     Host(host): Host,
@@ -59,6 +63,71 @@ pub async fn proxy(
     let status_code = StatusCode::try_from(res.status_code)
         .map_err(|_| ErrorResponse::bad_gateway("container sent invalid status code"))?;
     Ok((status_code, headers, res.body))
+}
+
+#[axum::debug_handler]
+pub async fn proxy_websocket(
+    State(app_state): State<AppState>,
+    Host(host): Host,
+    upgrade: WebSocketUpgrade,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ErrorResponse> {
+    let ParsedHost { session_id, port } = ParsedHost::parse(host)?;
+
+    let uri = headers
+        .get("X-Hydra-URI")
+        .ok_or_else(|| ErrorResponse::bad_request("X-Hydra-URI header not found"))?
+        .to_str()
+        .map_err(|_| ErrorResponse::bad_request("X-Hydra-URI is an invalid string"))?;
+
+    let request = ContainerProxyRequest {
+        method: "GET".to_string(),
+        uri: uri.to_string(),
+        // FIXME: is there a way to not clone the underlying byte representation?
+        body: vec![],
+        headers: parse_client_headers(&headers)?,
+        port: port.into(),
+    };
+
+    let (req, res) = WebSocketConnectionRequest::new(request);
+    app_state
+        .websocket_connection_requests
+        .read()
+        .await
+        .get(&session_id.into())
+        .ok_or_else(|| ErrorResponse::not_found("Container not found"))?
+        .send(req)
+        .await
+        .map_err(|_| ErrorResponse::error("Failed to send request to container proxy"))?;
+
+    let WebSocketConnection { mut rx, tx, .. } = res.await.map_err(|e| {
+        log::error!("Failed to receive response from container proxy: {}", e);
+        ErrorResponse::error("Failed to receive response from container proxy")
+    })?;
+
+    Ok(upgrade.on_upgrade(|ws| async move {
+        let (mut ws_tx, mut ws_rx) = ws.split();
+        loop {
+            tokio::select! {
+                message = ws_rx.next() => {
+                    match message {
+                        Some(Ok(message)) => tx.send(message.into()).await.unwrap(),
+                        Some(Err(e)) => {
+                            log::error!("websocket error: {}", e);
+                            break;
+                        },
+                        None => break,
+                    }
+                },
+                message = rx.recv() => {
+                    match message {
+                        Some(message) => ws_tx.send(message.into()).await.unwrap(),
+                        None => break,
+                    }
+                },
+            }
+        }
+    }))
 }
 
 pub struct ExtractMethod(pub Method);

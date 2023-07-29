@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+// TODO: add a max size and a timeout
 #[derive(Debug)]
 pub struct RpcRecords<T: std::fmt::Debug> {
     pub records: HashMap<Uuid, oneshot::Sender<Result<T, String>>>,

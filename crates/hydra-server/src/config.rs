@@ -37,8 +37,8 @@ impl Config {
                 use_https: false,
                 docker: DockerConfig {
                     cpu_set: "0".to_string(),
-                    cpu_shares: 10_000,
-                    memory: 8 * 1000 * 1000,
+                    cpu_shares: 50_000,
+                    memory: 256 * 1000 * 1000,
                 },
             },
         };

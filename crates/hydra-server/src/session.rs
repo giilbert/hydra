@@ -1,4 +1,4 @@
-use crate::{container::Container, AppState};
+use crate::{container::Container, proxy_websockets::WebSocketConnectionRequest, AppState};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use redis::AsyncCommands;
@@ -55,8 +55,11 @@ pub struct Session {
     pub ticket: Uuid,
     pub display_id: String,
     pub proxy_requests: mpsc::Sender<ProxyPayload>,
+    pub websocket_connections_requests: mpsc::Sender<WebSocketConnectionRequest>,
 
     proxy_rx: Arc<Mutex<Option<mpsc::Receiver<ProxyPayload>>>>,
+    websocket_connections_request_rx:
+        Arc<Mutex<Option<mpsc::Receiver<WebSocketConnectionRequest>>>>,
     container: Arc<RwLock<Container>>,
     self_destruct_timer: Mutex<Option<JoinHandle<()>>>,
     app_state: AppState,
@@ -95,6 +98,8 @@ impl Session {
         }
 
         let (proxy_tx, proxy_rx) = mpsc::channel(32);
+        let (websocket_connections_request_tx, websocket_connections_request_rx) =
+            mpsc::channel(32);
 
         Ok(Session {
             ticket,
@@ -105,6 +110,10 @@ impl Session {
             ),
             proxy_requests: proxy_tx,
             proxy_rx: Arc::new(Mutex::new(Some(proxy_rx))),
+            websocket_connections_requests: websocket_connections_request_tx,
+            websocket_connections_request_rx: Arc::new(Mutex::new(Some(
+                websocket_connections_request_rx,
+            ))),
             container: Arc::new(RwLock::new(container)),
             self_destruct_timer: Mutex::new(None),
             app_state,
@@ -225,7 +234,7 @@ impl Session {
         let machine_ip = if std::env::var("FLY_PRIVATE_IP").is_ok() {
             std::env::var("FLY_PRIVATE_IP").unwrap()
         } else {
-            "http://localhost:3100".to_string()
+            "localhost".to_string()
         };
 
         let _: () = self
@@ -290,6 +299,42 @@ impl Session {
                             };
 
                         response_tx.send(response).unwrap();
+                    }
+                    _ = stop_rx_clone.changed() => {
+                        break
+                    }
+                }
+            }
+        });
+
+        // this task handles websocket proxying
+        let this_clone = this.clone();
+        let mut websocket_connections_request_rx = this
+            .websocket_connections_request_rx
+            .lock()
+            .await
+            .take()
+            .unwrap();
+        let mut stop_rx_clone = stop_rx.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some(request) = websocket_connections_request_rx.recv() => {
+                        log::info!("got request: {request:?}");
+                        let response = match this_clone
+                            .container
+                            .read()
+                            .await
+                            .create_websocket_connection(request.proxy_request)
+                            .await {
+                                Ok(response) => response,
+                                Err(err) => {
+                                    log::error!("[{}] Error handling WebSocket connection request: {}", this_clone.display_id, err);
+                                    continue;
+                                }
+                            };
+
+                        request.tx.send(response).unwrap();
                     }
                     _ = stop_rx_clone.changed() => {
                         break
@@ -367,30 +412,7 @@ impl Session {
             .take()
             .expect("ws_tx not given back");
 
-        if let Err(e) = ws_rx.reunite(ws_tx)?.close().await {
-            use tokio_tungstenite::tungstenite::Error as WSError;
-
-            let inner = e
-                .into_inner()
-                .downcast::<WSError>()
-                // i think only tungstenite errors are possible, but idk
-                .map_err(|e| {
-                    eyre!(
-                        "[{}] Received anything but a tungstenite error: {:?}",
-                        this.display_id,
-                        e
-                    )
-                })?;
-
-            match *inner {
-                WSError::ConnectionClosed => {
-                    log::info!("[{}] Connection closed", this.display_id);
-                }
-                e => {
-                    log::error!("[{}] Error closing connection: {}", this.display_id, e);
-                }
-            }
-        }
+        let _ = ws_rx.reunite(ws_tx)?.close().await;
 
         this.prime_self_destruct().await;
 

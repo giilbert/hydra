@@ -8,5 +8,10 @@
     "name": "node18",
     "dockerfile": "node18.dockerfile",
     "command": "node"
+  },
+  {
+    "name": "turtle",
+    "dockerfile": "turtle/turtle.dockerfile",
+    "command": "python3"
   }
 ]

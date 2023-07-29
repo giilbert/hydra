@@ -165,16 +165,30 @@ pub async fn execute_websocket(
 
     Ok(ws.on_upgrade(move |ws| async move {
         let ticket = session.ticket.clone();
+
         app_state
             .proxy_requests
             .write()
             .await
             .insert(session.ticket.clone(), session.proxy_requests.clone());
+        app_state
+            .websocket_connection_requests
+            .write()
+            .await
+            .insert(
+                session.ticket.clone(),
+                session.websocket_connections_requests.clone(),
+            );
 
         if let Err(err) = session.handle_websocket_connection(ws).await {
             log::error!("Error handling WebSocket connection: {:?}", err);
         }
 
         app_state.proxy_requests.write().await.remove(&ticket);
+        app_state
+            .websocket_connection_requests
+            .write()
+            .await
+            .remove(&ticket);
     }))
 }

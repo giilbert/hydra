@@ -4,6 +4,7 @@ mod container;
 mod execute;
 mod pool;
 mod proxy_interface;
+mod proxy_websockets;
 mod rpc;
 mod session;
 mod shutdown;
@@ -12,6 +13,7 @@ use crate::{
     app_state::AppState,
     config::{Config, Environment},
     execute::{execute_headless, execute_websocket},
+    proxy_interface::proxy_websocket,
 };
 use axum::{
     extract::Host,
@@ -25,7 +27,7 @@ use axum::{
 use axum_server::tls_rustls::RustlsConfig;
 use container::Container;
 use execute::execute;
-use proxy_interface::proxy;
+use proxy_interface::proxy_http;
 use shared::prelude::*;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
@@ -56,7 +58,8 @@ async fn main() -> Result<()> {
         .route("/", get(|| async { "Hydra" }))
         .route("/execute", post(execute).get(execute_websocket))
         .route("/execute-headless", post(execute_headless))
-        .route("/proxy", any(proxy))
+        .route("/proxy", any(proxy_http))
+        .route("/proxy-websocket", get(proxy_websocket))
         .with_state(state.clone())
         .layer(
             CorsLayer::new()

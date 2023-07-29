@@ -1,4 +1,8 @@
-use crate::{procedures::handle_rpc_procedure, proxy::make_proxy_request, state::State};
+use crate::{
+    procedures::handle_rpc_procedure,
+    proxy::{make_proxy_request, open_websocket_connection},
+    state::State,
+};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
@@ -102,9 +106,9 @@ impl Commands {
                     log::debug!("Sent RPC response: {:?}", res);
                 }
                 HostSent::ProxyHTTPRequest(req_id, req) => {
-                    log::info!("Received proxy request: {:?}", req);
+                    log::debug!("Received proxy request: {:?}", req);
                     let proxy_response = make_proxy_request(req).await;
-                    log::info!("Proxy response: {:?}", proxy_response);
+                    log::debug!("Proxy response: {:?}", proxy_response);
 
                     self.commands_tx
                         .send_timeout(
@@ -115,6 +119,30 @@ impl Commands {
                                 },
                             )?)),
                             std::time::Duration::from_millis(100),
+                        )
+                        .await?;
+                }
+                HostSent::WebSocketMessage { id, message } => {
+                    log::info!("Received WebSocket message: [{id}] {message:?}");
+                    self.state.send_ws_message(id, message).await;
+                }
+                HostSent::CreateWebSocketConnection(req_id, req) => {
+                    let (connection_id, commands) =
+                        open_websocket_connection(self.state.clone(), req)
+                            .await
+                            .unwrap();
+
+                    self.state.add_websocket(connection_id, commands);
+
+                    self.commands_tx
+                        .send_timeout(
+                            Command::Send(Message::Binary(rmp_serde::to_vec_named(
+                                &ContainerSent::WebSocketConnectionResponse {
+                                    req_id,
+                                    id: connection_id,
+                                },
+                            )?)),
+                            Duration::from_millis(100),
                         )
                         .await?;
                 }

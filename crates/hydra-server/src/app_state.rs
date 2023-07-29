@@ -1,11 +1,12 @@
 use crate::{
     config::Environment,
     pool::ContainerPool,
+    proxy_websockets::{WebSocketConnection, WebSocketConnectionRequest},
     session::{ProxyPayload, Session},
 };
 use redis::Client;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -23,7 +24,9 @@ impl std::ops::Deref for AppState {
 
 pub struct AppStateInner {
     pub sessions: RwLock<HashMap<Uuid, Session>>,
-    pub proxy_requests: RwLock<HashMap<Uuid, tokio::sync::mpsc::Sender<ProxyPayload>>>,
+    pub proxy_requests: RwLock<HashMap<Uuid, mpsc::Sender<ProxyPayload>>>,
+    pub websocket_connection_requests:
+        RwLock<HashMap<Uuid, mpsc::Sender<WebSocketConnectionRequest>>>,
     pub container_pool: ContainerPool,
     pub api_key: String,
     pub redis: RwLock<redis::aio::Connection>,
@@ -57,6 +60,7 @@ impl AppState {
             inner: Arc::new(AppStateInner {
                 sessions: Default::default(),
                 proxy_requests: Default::default(),
+                websocket_connection_requests: Default::default(),
                 api_key: std::env::var("HYDRA_API_KEY").unwrap_or_else(|_| {
                     log::warn!("No API key set. Using `hydra`.");
                     "hydra".to_string()

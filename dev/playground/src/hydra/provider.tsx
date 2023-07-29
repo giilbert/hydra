@@ -80,6 +80,12 @@ export const HydraProvider: React.FC<{
           title: "Web Gateway URL",
           description: `${data.ticket}--[PORT].localhost:3101`,
         });
+        setTimeout(() => {
+          window.open(
+            `http://${data.ticket}--6080.localhost:3101/vnc_lite.html`,
+            "_blank"
+          );
+        }, 200);
         ws.current.send(
           JSON.stringify({
             type: "Run",

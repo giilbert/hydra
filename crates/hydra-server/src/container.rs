@@ -1,4 +1,11 @@
-use crate::{config::Config, rpc::RpcRecords, shutdown, Environment};
+use crate::{
+    config::Config,
+    proxy_websockets::{
+        WebSocketConnection, WebSocketConnectionCommands, WebSocketConnectionRequest,
+    },
+    rpc::RpcRecords,
+    shutdown, Environment,
+};
 use bollard::{
     container,
     service::{ContainerStateStatusEnum, HostConfig},
@@ -18,6 +25,7 @@ use shared::{
     },
 };
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -28,12 +36,12 @@ use std::{
 use tokio::{
     fs,
     net::{UnixListener, UnixStream},
-    sync::{mpsc, watch, Mutex},
+    sync::{mpsc, watch, Mutex, RwLock},
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
 
-type StopRx = watch::Receiver<()>;
+pub type StopRx = watch::Receiver<()>;
 
 lazy_static! {
     static ref DOCKER: Docker =
@@ -64,11 +72,15 @@ pub struct Container {
     rpc_records: Arc<Mutex<RpcRecords<Value>>>,
     /// Keeps track of proxy requests and is used for responses
     proxy_records: Arc<Mutex<RpcRecords<ContainerProxyResponse>>>,
+
+    websocket_connection_request_records: Arc<Mutex<RpcRecords<WebSocketConnection>>>,
+    websocket_connections: Arc<RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>>,
 }
 
 #[derive(Clone, Debug)]
 pub enum ContainerCommands {
     SendMessage(HostSent),
+    RemoveWebSocketConnection(u32),
     Stop,
 }
 
@@ -95,7 +107,7 @@ impl Container {
                     ..Default::default()
                 }),
                 container::Config {
-                    image: Some("hydra-python3"),
+                    image: Some("hydra-turtle"),
                     host_config: Some(HostConfig {
                         binds: Some(vec![format!(
                             "{}:/run/hydra",
@@ -126,6 +138,7 @@ impl Container {
             .start_container::<String>(&create_response.id, None)
             .await?;
 
+        // FIXME: error if container does not connect after some time
         let ws_stream = match listener.accept().await {
             Ok((stream, _)) => accept_async(stream).await?,
             Err(e) => {
@@ -139,6 +152,8 @@ impl Container {
 
         let rpc_records = Arc::new(Mutex::new(RpcRecords::new()));
         let proxy_records = Arc::new(Mutex::new(RpcRecords::new()));
+        let websocket_connection_request_records = Arc::new(Mutex::new(RpcRecords::new()));
+        let websocket_connections = Arc::new(RwLock::new(HashMap::new()));
 
         let (container_message_tx, container_message_rx) = mpsc::channel::<ContainerSent>(64);
 
@@ -151,11 +166,15 @@ impl Container {
             create_response.id.clone(),
             ws_stream,
             container_commands_rx,
+            container_commands_tx.clone(),
             rpc_records.clone(),
             proxy_records.clone(),
+            websocket_connection_request_records.clone(),
+            websocket_connections.clone(),
             container_message_tx,
             container_socket_dir.clone(),
             stop_tx,
+            stop_rx.clone(),
             deletion_tx.clone(),
         ));
 
@@ -171,6 +190,8 @@ impl Container {
             container_rx: Some(container_message_rx),
             stop_rx,
             stopped: false.into(),
+            websocket_connection_request_records,
+            websocket_connections,
         })
     }
 
@@ -275,6 +296,35 @@ impl Container {
         res.map_err(|e| eyre!("container failed to proxy: {:?}", e))
     }
 
+    pub async fn create_websocket_connection(
+        &self,
+        req: ContainerProxyRequest,
+    ) -> Result<WebSocketConnection> {
+        let id = Uuid::new_v4();
+
+        self.commands_tx
+            .send(ContainerCommands::SendMessage(
+                HostSent::CreateWebSocketConnection(id, req),
+            ))
+            .await?;
+
+        let await_response = self
+            .websocket_connection_request_records
+            .lock()
+            .await
+            .await_response(id)?;
+
+        let mut stop_rx_clone = self.stop_rx.clone();
+        let response = tokio::select! {
+            d = await_response => d,
+            _ = tokio::time::sleep(Duration::from_secs(10)) => bail!("container failed to respond to RPC in 10 seconds"),
+            _ = stop_rx_clone.changed() => bail!("container stopped during RPC")
+        };
+        let res = response?;
+
+        res.map_err(|e| eyre!("container failed to create websocket connection: {:?}", e))
+    }
+
     async fn forward_logs(container_id: String, logging_id: String, mut stop_rx: StopRx) {
         let mut log_stream = DOCKER.logs(
             &container_id,
@@ -304,8 +354,12 @@ impl Container {
 
     async fn handle_message(
         msg: ContainerSent,
+        commands: &mpsc::Sender<ContainerCommands>,
+        stop_rx: &StopRx,
         rpc_records: &Mutex<RpcRecords<Value>>,
         proxy_records: &Mutex<RpcRecords<ContainerProxyResponse>>,
+        websocket_connection_records: &Mutex<RpcRecords<WebSocketConnection>>,
+        websocket_connections: &RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>,
         container_tx: &mpsc::Sender<ContainerSent>,
         logging_id: &str,
     ) -> Result<()> {
@@ -328,6 +382,29 @@ impl Container {
                     log::error!("[{logging_id}] Error handling proxy response: {err:#?}");
                 };
             }
+            ContainerSent::WebSocketConnectionResponse { req_id, id } => {
+                let connection = WebSocketConnection::new(id, stop_rx.clone(), commands.clone());
+                let container_tx = connection.container_tx.clone();
+
+                websocket_connections.write().await.insert(id, container_tx);
+                let mut websocket_connection_records = websocket_connection_records.lock().await;
+                if let Err(err) =
+                    websocket_connection_records.handle_incoming(req_id, Ok(connection))
+                {
+                    log::error!(
+                        "[{logging_id}] Error handling websocket connection response: {err:#?}"
+                    );
+                };
+            }
+            ContainerSent::WebSocketMessage { id, message } => {
+                let _ = websocket_connections
+                    .read()
+                    .await
+                    .get(&id)
+                    .ok_or_else(|| eyre!("no websocket connection with id {}", id))?
+                    .send(WebSocketConnectionCommands::Send(message.into()))
+                    .await;
+            }
             _ => container_tx.send(msg).await?,
         }
 
@@ -340,9 +417,14 @@ impl Container {
 
         rpc_records: Arc<Mutex<RpcRecords<Value>>>,
         proxy_records: Arc<Mutex<RpcRecords<ContainerProxyResponse>>>,
+        websocket_connection_records: Arc<Mutex<RpcRecords<WebSocketConnection>>>,
+        websocket_connections: Arc<RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>>,
 
         commands_rx: &mut mpsc::Receiver<ContainerCommands>,
+        commands_tx: &mpsc::Sender<ContainerCommands>,
+
         container_tx: &mpsc::Sender<ContainerSent>,
+        stop_rx: StopRx,
 
         logging_id: &str,
     ) -> Result<()> {
@@ -362,8 +444,12 @@ impl Container {
 
                             Container::handle_message(
                                 msg,
+                                &commands_tx,
+                                &stop_rx,
                                 &rpc_records,
                                 &proxy_records,
+                                &websocket_connection_records,
+                                &websocket_connections,
                                 &container_tx,
                                 &logging_id,
                             )
@@ -384,6 +470,9 @@ impl Container {
                             container_ws_tx.send(Message::Binary(bin)).await?;
                             log::debug!("[{logging_id}] Sent message: {:#?}", msg);
                         }
+                        ContainerCommands::RemoveWebSocketConnection(id) => {
+                            websocket_connections.write().await.remove(&id);
+                        }
                         ContainerCommands::Stop => {
                             log::info!("[{logging_id}]: 1,1. received stop command, exiting event loop");
                             break;
@@ -400,11 +489,15 @@ impl Container {
         container_id: String,
         ws_stream: WebSocketStream<UnixStream>,
         mut commands_rx: mpsc::Receiver<ContainerCommands>,
+        commands_tx: mpsc::Sender<ContainerCommands>,
         rpc_records: Arc<Mutex<RpcRecords<Value>>>,
         proxy_records: Arc<Mutex<RpcRecords<ContainerProxyResponse>>>,
+        websocket_connection_records: Arc<Mutex<RpcRecords<WebSocketConnection>>>,
+        websocket_connections: Arc<RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>>,
         container_tx: mpsc::Sender<ContainerSent>,
         socket_dir: PathBuf,
         stop_tx: watch::Sender<()>,
+        stop_rx: StopRx,
         deletion_tx: Option<mpsc::Sender<String>>,
     ) -> Result<()> {
         // reading stop messages:
@@ -421,8 +514,12 @@ impl Container {
             &mut container_ws_tx,
             rpc_records,
             proxy_records,
+            websocket_connection_records,
+            websocket_connections,
             &mut commands_rx,
+            &commands_tx,
             &container_tx,
+            stop_rx,
             &logging_id,
         )
         .await

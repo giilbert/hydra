@@ -2,6 +2,7 @@
 
 ### TODOs:
 
+- Make building base images not slow (copy /bin/hydrad to output)
 - Refactor states to use Redis connection pooling
 
 Sandboxed code execution. _with a terminal_

@@ -1,16 +1,76 @@
 use futures_util::{SinkExt, StreamExt};
-use hyper::upgrade::Upgraded;
-use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
+use http::Request;
+use hyper::{upgrade::Upgraded, HeaderMap, Uri};
+use tokio_tungstenite::{connect_async, tungstenite::Message, WebSocketStream};
 
-pub async fn accept_websocket_connection(ws: WebSocketStream<Upgraded>) {
-    let (mut tx, rx) = ws.split();
+pub async fn accept_websocket_connection(
+    proxy_url: String,
+    headers: HeaderMap,
+    ws: WebSocketStream<Upgraded>,
+) {
+    let (mut tx, mut rx) = ws.split();
+
+    log::info!("accepted websocket connection {}", proxy_url);
+
+    // make a request to the proxy server with headers and uri
+    // the proxy server will respond with a websocket connection
+    let mut request = Request::builder()
+        .method("GET")
+        .uri(proxy_url.clone())
+        .body(())
+        .unwrap();
+    *request.headers_mut() = headers;
+
+    let (connection, _) = connect_async(request)
+        .await
+        .map_err(|e| {
+            log::error!("{}", e.to_string());
+        })
+        .unwrap();
 
     log::info!("accepted websocket connection");
 
-    tx.send(Message::Text("Hello!".into())).await.unwrap();
+    let (mut server_tx, mut server_rx) = connection.split();
 
-    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                message = rx.next() => {
+                    match message {
+                        Some(Ok(message)) => {
+                            // log::info!("received message from client: {:?}", message);
+                            server_tx.send(message).await.unwrap();
+                        }
+                        Some(Err(e)) => {
+                            log::error!("websocket error: {}", e);
+                            break;
+                        }
+                        None => {
+                            log::info!("client closed connection");
+                            break;
+                        }
+                    }
+                }
+                message = server_rx.next() => {
+                    match message {
+                        Some(Ok(message)) => {
+                            // log::info!("received message from server: {:?}", message);
+                            tx.send(message).await.unwrap();
+                        }
+                        Some(Err(e)) => {
+                            log::error!("websocket error: {}", e);
+                            break;
+                        }
+                        None => {
+                            log::info!("server closed connection");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
 
-    let mut ws = tx.reunite(rx).unwrap();
-    ws.close(None).await.unwrap();
+        let mut ws = tx.reunite(rx).unwrap();
+        let _ = ws.close(None).await;
+    });
 }

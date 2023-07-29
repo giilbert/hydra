@@ -22,22 +22,23 @@ def build():
     for metadata in metadatas:
         build_metadata(metadata)
 
+
 def build_single(name: str):
     with open("deploy/base/_meta.json", "r") as f:
         metadatas: list[ImageSpec] = json.load(f)
         metadatas = [ImageSpec.from_dict(metadata) for metadata in metadatas]
-    
+
     for metadata in metadatas:
         if metadata.name == name:
             build_metadata(metadata)
             return
-    
+
 
 def build_metadata(metadata: ImageSpec):
     print(f"> Building image `{metadata.name}`")
     if (
         cmd(
-            f"docker build --file ./deploy/base/{metadata.dockerfile} -t hydra-{metadata.name} ."
+            f"docker build --file ./deploy/base/{metadata.dockerfile} -t hydra-{metadata.name} ./deploy/base"
         )
         != 0
     ):

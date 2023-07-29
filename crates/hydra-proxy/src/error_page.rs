@@ -2,7 +2,7 @@ use axum::{
     body,
     response::{IntoResponse, Response},
 };
-use hyper::StatusCode;
+use http::StatusCode;
 
 pub struct ErrorPage {
     pub status_code: StatusCode,

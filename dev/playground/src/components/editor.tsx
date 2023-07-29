@@ -20,18 +20,20 @@ export const Editor: React.FC = () => {
   const [files, setFiles] = useState<File[]>([
     {
       path: "main.py",
-      content: `from greet import greet
+      content: `from turtle import Turtle
+from time import sleep
+from random import random
 
-name = input("Hello there! What is your name? ")
-greet(name)
-print("Goodbye!")`,
-    },
-    {
-      path: "greet.py",
-      content: `def greet(name):
-  if name.lower() == "nirjhor":
-    return
-  print(f"Hi {name}! I hope you're having a wonderful day!")`,
+sleep(1)
+
+t = Turtle()
+
+while True:
+  t.forward(100)
+  t.left(179)
+  # change the pen color to a random color
+  t.color(random(), random(), random())
+`,
     },
   ]);
   const [selectedFile, setSelectedFile] = useState<string>("main.py");
