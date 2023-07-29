@@ -14,6 +14,7 @@ use futures_util::{
     SinkExt, StreamExt,
 };
 use lazy_static::lazy_static;
+use parking_lot::Mutex;
 use serde_json::Value;
 use shared::{
     prelude::*,
@@ -34,7 +35,7 @@ use std::{
 use tokio::{
     fs,
     net::{UnixListener, UnixStream},
-    sync::{mpsc, watch, Mutex, RwLock},
+    sync::{mpsc, watch, RwLock},
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
@@ -63,19 +64,19 @@ pub struct Container {
     stop_tx: watch::Sender<()>,
 
     // used for bidirectional communication between the container and connected client
-    container_rx: parking_lot::Mutex<Option<mpsc::Receiver<ContainerSent>>>,
+    container_rx: Mutex<Option<mpsc::Receiver<ContainerSent>>>,
     container_tx: mpsc::Sender<ContainerSent>,
 
     commands_tx: mpsc::Sender<ContainerCommands>,
 
     deletion_tx: Option<mpsc::Sender<String>>,
     /// Keeps track of RPC calls and is used for responses
-    rpc_records: Arc<Mutex<RpcRecords<Value>>>,
+    rpc_records: Mutex<RpcRecords<Value>>,
     /// Keeps track of proxy requests and is used for responses
-    proxy_records: Arc<Mutex<RpcRecords<ContainerProxyResponse>>>,
+    proxy_records: Mutex<RpcRecords<ContainerProxyResponse>>,
 
-    websocket_connection_request_records: Arc<Mutex<RpcRecords<WebSocketConnection>>>,
-    websocket_connections: Arc<RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>>,
+    websocket_connection_request_records: Mutex<RpcRecords<WebSocketConnection>>,
+    websocket_connections: RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -151,10 +152,10 @@ impl Container {
 
         let (container_commands_tx, container_commands_rx) = mpsc::channel::<ContainerCommands>(32);
 
-        let rpc_records = Arc::new(Mutex::new(RpcRecords::new()));
-        let proxy_records = Arc::new(Mutex::new(RpcRecords::new()));
-        let websocket_connection_request_records = Arc::new(Mutex::new(RpcRecords::new()));
-        let websocket_connections = Arc::new(RwLock::new(HashMap::new()));
+        let rpc_records = Mutex::new(RpcRecords::new());
+        let proxy_records = Mutex::new(RpcRecords::new());
+        let websocket_connection_request_records = Mutex::new(RpcRecords::new());
+        let websocket_connections = RwLock::new(HashMap::new());
 
         let (container_message_tx, container_message_rx) = mpsc::channel::<ContainerSent>(64);
 
@@ -214,7 +215,7 @@ impl Container {
             .await?;
 
         log::debug!("[{}]: waiting for RPC response", self.display_id);
-        let await_response = self.rpc_records.lock().await.await_response(id)?;
+        let await_response = self.rpc_records.lock().await_response(id)?;
         let mut stop_rx_clone = self.stop_rx.clone();
         let response = tokio::select! {
             d = await_response => d,
@@ -269,7 +270,7 @@ impl Container {
             .await?;
 
         log::debug!("[{}]: waiting for proxy response", self.display_id);
-        let await_response = self.proxy_records.lock().await.await_response(id)?;
+        let await_response = self.proxy_records.lock().await_response(id)?;
         let mut stop_rx_clone = self.stop_rx.clone();
         let response = tokio::select! {
             d = await_response => d,
@@ -298,7 +299,6 @@ impl Container {
         let await_response = self
             .websocket_connection_request_records
             .lock()
-            .await
             .await_response(id)?;
 
         let mut stop_rx_clone = self.stop_rx.clone();
@@ -345,7 +345,7 @@ impl Container {
                 let response = serde_json::from_str::<Result<Value, String>>(&result)
                     .expect("serde_json deserialize error");
                 log::debug!("Got rpc response: {:#?}", response);
-                let mut rpc_records = self.rpc_records.lock().await;
+                let mut rpc_records = self.rpc_records.lock();
                 log::debug!("Handling rpc response");
                 if let Err(err) = rpc_records.handle_incoming(id, response) {
                     log::error!(
@@ -356,7 +356,7 @@ impl Container {
             }
             ContainerSent::ProxyResponse { req_id, response } => {
                 // log::debug!("Got rpc response: {:#?}", response);
-                let mut proxy_records = self.proxy_records.lock().await;
+                let mut proxy_records = self.proxy_records.lock();
                 // log::debug!("Handling proxy response");
                 if let Err(err) = proxy_records.handle_incoming(req_id, response) {
                     log::error!(
@@ -375,7 +375,7 @@ impl Container {
                     .await
                     .insert(id, container_tx);
                 let mut websocket_connection_request_records =
-                    self.websocket_connection_request_records.lock().await;
+                    self.websocket_connection_request_records.lock();
                 if let Err(err) =
                     websocket_connection_request_records.handle_incoming(req_id, Ok(connection))
                 {
