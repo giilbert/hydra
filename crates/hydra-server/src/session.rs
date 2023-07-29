@@ -1,6 +1,7 @@
 use crate::{container::Container, proxy_websockets::WebSocketConnectionRequest, AppState};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
+use parking_lot::Mutex;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use shared::{
@@ -12,7 +13,7 @@ use shared::{
 };
 use std::sync::Arc;
 use tokio::{
-    sync::{mpsc, oneshot, Mutex},
+    sync::{mpsc, oneshot},
     task::JoinHandle,
 };
 use uuid::Uuid;
@@ -57,9 +58,8 @@ pub struct Session {
     pub proxy_requests: mpsc::Sender<ProxyPayload>,
     pub websocket_connections_requests: mpsc::Sender<WebSocketConnectionRequest>,
 
-    proxy_rx: Arc<Mutex<Option<mpsc::Receiver<ProxyPayload>>>>,
-    websocket_connections_request_rx:
-        Arc<Mutex<Option<mpsc::Receiver<WebSocketConnectionRequest>>>>,
+    proxy_rx: Mutex<Option<mpsc::Receiver<ProxyPayload>>>,
+    websocket_connections_request_rx: Mutex<Option<mpsc::Receiver<WebSocketConnectionRequest>>>,
     container: Arc<Container>,
     self_destruct_timer: Mutex<Option<JoinHandle<()>>>,
     app_state: AppState,
@@ -109,11 +109,9 @@ impl Session {
                 container.docker_id[0..5].to_string()
             ),
             proxy_requests: proxy_tx,
-            proxy_rx: Arc::new(Mutex::new(Some(proxy_rx))),
+            proxy_rx: Mutex::new(Some(proxy_rx)),
             websocket_connections_requests: websocket_connections_request_tx,
-            websocket_connections_request_rx: Arc::new(Mutex::new(Some(
-                websocket_connections_request_rx,
-            ))),
+            websocket_connections_request_rx: Mutex::new(Some(websocket_connections_request_rx)),
             container,
             self_destruct_timer: Mutex::new(None),
             app_state,
@@ -126,7 +124,7 @@ impl Session {
         let ticket = self.ticket.clone();
         let container = self.container.clone();
 
-        *self.self_destruct_timer.lock().await = Some(tokio::spawn(async move {
+        *self.self_destruct_timer.lock() = Some(tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
             let count: u32 = app_state
@@ -147,7 +145,7 @@ impl Session {
     }
 
     pub async fn cancel_self_destruct(&mut self) {
-        if let Some(handle) = self.self_destruct_timer.lock().await.take() {
+        if let Some(handle) = self.self_destruct_timer.lock().take() {
             handle.abort();
         }
     }
@@ -273,7 +271,7 @@ impl Session {
 
         // this task handles proxy requests
         let this_clone = this.clone();
-        let mut proxy_rx = this.proxy_rx.lock().await.take().unwrap();
+        let mut proxy_rx = this.proxy_rx.lock().take().unwrap();
         let mut stop_rx_clone = stop_rx.clone();
         tokio::spawn(async move {
             loop {
@@ -302,12 +300,8 @@ impl Session {
 
         // this task handles websocket proxying
         let this_clone = this.clone();
-        let mut websocket_connections_request_rx = this
-            .websocket_connections_request_rx
-            .lock()
-            .await
-            .take()
-            .unwrap();
+        let mut websocket_connections_request_rx =
+            this.websocket_connections_request_rx.lock().take().unwrap();
         let mut stop_rx_clone = stop_rx.clone();
         tokio::spawn(async move {
             loop {
@@ -341,7 +335,7 @@ impl Session {
         let maybe_ws_tx = Arc::new(Mutex::new(Some(ws_tx)));
         let maybe_ws_tx_clone = maybe_ws_tx.clone();
         let client_sender_task = tokio::spawn(async move {
-            let mut ws_tx = maybe_ws_tx_clone.lock().await.take().unwrap();
+            let mut ws_tx = maybe_ws_tx_clone.lock().take().unwrap();
             loop {
                 tokio::select! {
                     Some(message_to_send) = messages_rx.recv() => {
@@ -352,7 +346,7 @@ impl Session {
                     }
                 }
             }
-            *maybe_ws_tx_clone.lock().await = Some(ws_tx);
+            *maybe_ws_tx_clone.lock() = Some(ws_tx);
         });
 
         // this task handles messages from the client
@@ -397,12 +391,7 @@ impl Session {
         client_sender_task.await?;
         container_message_task.await?;
 
-        let ws_tx = maybe_ws_tx
-            .lock()
-            .await
-            .take()
-            .expect("ws_tx not given back");
-
+        let ws_tx = maybe_ws_tx.lock().take().expect("ws_tx not given back");
         let _ = ws_rx.reunite(ws_tx)?.close().await;
 
         this.prime_self_destruct().await;
