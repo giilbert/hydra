@@ -18,6 +18,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
+/// Sent from the client to the server
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum ClientMessage {
@@ -27,6 +28,7 @@ pub enum ClientMessage {
     Crash,
 }
 
+/// Sent from the server to the client
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", content = "data")]
 pub enum ServerMessage {
@@ -39,16 +41,17 @@ pub type ProxyPayload = (
     oneshot::Sender<ContainerProxyResponse>,
 );
 
-/// # Where all the magic happens
+/// Where all the magic happens
 ///
-/// ## This struct:
+/// **This struct:**
 /// - Handles communication between the client and the container
 ///   - Server -> client: `ServerMessage` enum
 ///   - Client -> server: `ClientMessage` enum
 /// - Makes sure everything is cleaned up when the client leaves
 /// - Make sure everything the client does with the container is allowed
+/// - Registers the session with redis, for proxying
 ///
-/// ## It DOES NOT:
+/// **It DOES NOT:**
 /// - Make sure everything is cleaned up when the container crashes
 /// - Handle messages DIRECTLY from the container
 #[derive(Debug)]
@@ -56,13 +59,16 @@ pub struct Session {
     pub ticket: Uuid,
     pub display_id: String,
     pub proxy_requests: mpsc::Sender<ProxyPayload>,
-    pub websocket_connections_requests: mpsc::Sender<WebSocketConnectionRequest>,
+    pub websocket_connections_requests_tx: mpsc::Sender<WebSocketConnectionRequest>,
 
     proxy_rx: Mutex<Option<mpsc::Receiver<ProxyPayload>>>,
-    websocket_connections_request_rx: Mutex<Option<mpsc::Receiver<WebSocketConnectionRequest>>>,
+    websocket_connections_requests_rx: Mutex<Option<mpsc::Receiver<WebSocketConnectionRequest>>>,
     container: Arc<Container>,
     self_destruct_timer: Mutex<Option<JoinHandle<()>>>,
     app_state: AppState,
+
+    messages_tx: mpsc::Sender<Message>,
+    message_rx: Mutex<Option<mpsc::Receiver<Message>>>,
 }
 
 impl Session {
@@ -98,23 +104,26 @@ impl Session {
         }
 
         let (proxy_tx, proxy_rx) = mpsc::channel(32);
-        let (websocket_connections_request_tx, websocket_connections_request_rx) =
+        let (websocket_connections_requests_tx, websocket_connections_requests_rx) =
             mpsc::channel(32);
+        let (messages_tx, messages_rx) = mpsc::channel::<Message>(100);
 
         Ok(Session {
             ticket,
             display_id: format!(
                 "tck-{}, dok-{}",
-                ticket.to_string()[0..5].to_string(),
-                container.docker_id[0..5].to_string()
+                &ticket.to_string()[0..5],
+                &container.docker_id[0..5]
             ),
             proxy_requests: proxy_tx,
             proxy_rx: Mutex::new(Some(proxy_rx)),
-            websocket_connections_requests: websocket_connections_request_tx,
-            websocket_connections_request_rx: Mutex::new(Some(websocket_connections_request_rx)),
+            websocket_connections_requests_tx,
+            websocket_connections_requests_rx: Mutex::new(Some(websocket_connections_requests_rx)),
             container,
             self_destruct_timer: Mutex::new(None),
             app_state,
+            messages_tx,
+            message_rx: Mutex::new(Some(messages_rx)),
         })
     }
 
@@ -144,17 +153,14 @@ impl Session {
         }));
     }
 
-    pub async fn cancel_self_destruct(&mut self) {
+    /// If the session is still active, cancel the self destruct timer
+    pub fn cancel_self_destruct(&self) {
         if let Some(handle) = self.self_destruct_timer.lock().take() {
             handle.abort();
         }
     }
 
-    async fn handle_client_message(
-        &self,
-        message: String,
-        _messages_tx: &mut mpsc::Sender<Message>,
-    ) -> Result<()> {
+    async fn handle_client_message(&self, message: String) -> Result<()> {
         let data = match serde_json::from_str::<ClientMessage>(&message) {
             Ok(data) => data,
             Err(e) => {
@@ -196,11 +202,8 @@ impl Session {
         Ok(())
     }
 
-    async fn send_client_message(
-        message: ServerMessage,
-        messages_tx: &mut mpsc::Sender<Message>,
-    ) -> Result<()> {
-        messages_tx
+    async fn send_to_client(&self, message: ServerMessage) -> Result<()> {
+        self.messages_tx
             .send(Message::Text(
                 serde_json::to_string(&message).expect("serde_json error"),
             ))
@@ -208,16 +211,15 @@ impl Session {
         Ok(())
     }
 
-    async fn handle_container_message(
-        message: ContainerSent,
-        messages_tx: &mut mpsc::Sender<Message>,
-    ) -> Result<()> {
+    /// The container only forwards a few messages here for us to handle and send to the client.
+    async fn handle_container_message(&self, message: ContainerSent) -> Result<()> {
         match message {
             ContainerSent::PtyOutput { output, .. } => {
-                Self::send_client_message(ServerMessage::PtyOutput { output }, messages_tx).await?;
+                self.send_to_client(ServerMessage::PtyOutput { output })
+                    .await?;
             }
             ContainerSent::PtyExit { id } => {
-                Self::send_client_message(ServerMessage::PtyExit { id }, messages_tx).await?;
+                self.send_to_client(ServerMessage::PtyExit { id }).await?;
             }
             _ => (),
         }
@@ -225,16 +227,49 @@ impl Session {
         Ok(())
     }
 
-    pub async fn handle_websocket_connection(mut self, ws: WebSocket) -> Result<()> {
-        let mut stop_rx = self.container.on_stop();
-        self.cancel_self_destruct().await;
+    /// This function is called when a client makes a HTTP request to the proxy
+    /// and the proxy forwards it to the container.
+    ///
+    /// This is a separate task since proxying requests is an expensive operation
+    /// and we don't want to block the main session loop.
+    async fn proxy_requests_loop(self: Arc<Self>) {
+        let mut proxy_rx = self.proxy_rx.lock().take().unwrap();
+        let mut stop_rx_clone = self.container.on_stop();
 
+        loop {
+            tokio::select! {
+                Some((req, response_tx)) = proxy_rx.recv() => {
+                    // TODO: handle error
+                    let response = match self
+                        .container
+                        .proxy_request(req)
+                        .await {
+                            Ok(response) => response,
+                            Err(err) => {
+                                log::error!("[{}] Error handling proxy request: {err:#?}", self.display_id);
+                                continue;
+                            }
+                        };
+
+                    response_tx.send(response).unwrap();
+                }
+                _ = stop_rx_clone.changed() => break
+            }
+        }
+    }
+
+    /// This function is called when a WebSocket connection from the
+    /// client (not the container) is made
+    pub async fn handle_websocket_connection(self: Arc<Self>, ws: WebSocket) -> Result<()> {
+        let mut stop_rx = self.container.on_stop();
+        self.cancel_self_destruct();
+
+        // get the ip of the machine the container is running on and store it in redis
         let machine_ip = if std::env::var("FLY_PRIVATE_IP").is_ok() {
             std::env::var("FLY_PRIVATE_IP").unwrap()
         } else {
             "localhost".to_string()
         };
-
         let _: () = self
             .app_state
             .redis
@@ -243,111 +278,18 @@ impl Session {
             .set(format!("session:{}", self.ticket), machine_ip)
             .await?;
 
-        let this = Arc::new(self);
-
-        let (mut messages_tx, mut messages_rx) = mpsc::channel::<Message>(100);
-        let (ws_tx, mut ws_rx) = ws.split();
-
-        let mut container_rx = this.container.listen().expect("container already taken");
-
-        // this task handles messages from the container
-        let display_id_clone = this.display_id.clone();
-        let mut messages_tx_clone = messages_tx.clone();
-        let mut stop_rx_clone = stop_rx.clone();
-        let container_message_task = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    Some(container_message) = container_rx.recv() => {
-                        if let Err(err) = Self::handle_container_message(container_message, &mut messages_tx_clone).await {
-                            log::error!("[{}] Error handling container message: {}", display_id_clone, err);
-                        }
-                    }
-                    _ = stop_rx_clone.changed() => {
-                        break
-                    }
-                }
-            }
-        });
+        let (mut ws_tx, mut ws_rx) = ws.split();
 
         // this task handles proxy requests
-        let this_clone = this.clone();
-        let mut proxy_rx = this.proxy_rx.lock().take().unwrap();
-        let mut stop_rx_clone = stop_rx.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    Some((req, response_tx)) = proxy_rx.recv() => {
-                        // TODO: handle error
-                        let response = match this_clone
-                            .container
-                            .proxy_request(req)
-                            .await {
-                                Ok(response) => response,
-                                Err(err) => {
-                                    log::error!("[{}] Error handling proxy request: {}", this_clone.display_id, err);
-                                    continue;
-                                }
-                            };
+        let proxy_requests_task = tokio::spawn(self.clone().proxy_requests_loop());
 
-                        response_tx.send(response).unwrap();
-                    }
-                    _ = stop_rx_clone.changed() => {
-                        break
-                    }
-                }
-            }
-        });
-
-        // this task handles websocket proxying
-        let this_clone = this.clone();
-        let mut websocket_connections_request_rx =
-            this.websocket_connections_request_rx.lock().take().unwrap();
-        let mut stop_rx_clone = stop_rx.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    Some(request) = websocket_connections_request_rx.recv() => {
-                        log::info!("got request: {request:?}");
-                        let response = match this_clone
-                            .container
-                            .create_websocket_connection(request.proxy_request)
-                            .await {
-                                Ok(response) => response,
-                                Err(err) => {
-                                    log::error!("[{}] Error handling WebSocket connection request: {}", this_clone.display_id, err);
-                                    continue;
-                                }
-                            };
-
-                        request.tx.send(response).unwrap();
-                    }
-                    _ = stop_rx_clone.changed() => {
-                        break
-                    }
-                }
-            }
-        });
-
-        // this task forwards messages to the client
-        let this_clone = this.clone();
-        let mut stop_rx_clone = stop_rx.clone();
-        // takes ws_tx and then puts it back when the task is done
-        let maybe_ws_tx = Arc::new(Mutex::new(Some(ws_tx)));
-        let maybe_ws_tx_clone = maybe_ws_tx.clone();
-        let client_sender_task = tokio::spawn(async move {
-            let mut ws_tx = maybe_ws_tx_clone.lock().take().unwrap();
-            loop {
-                tokio::select! {
-                    Some(message_to_send) = messages_rx.recv() => {
-                        let _ = ws_tx.send(message_to_send).await;
-                    }
-                    _ = stop_rx_clone.changed() => {
-                        break
-                    }
-                }
-            }
-            *maybe_ws_tx_clone.lock() = Some(ws_tx);
-        });
+        let mut messages_rx = self.message_rx.lock().take().unwrap();
+        let mut websocket_connections_request_rx = self
+            .websocket_connections_requests_rx
+            .lock()
+            .take()
+            .unwrap();
+        let mut container_rx = self.container.listen().expect("container already taken");
 
         // this task handles messages from the client
         loop {
@@ -358,43 +300,60 @@ impl Session {
                         Some(Ok(Message::Close(_))) => break,
                         Some(Ok(_)) => continue,
                         Some(Err(e)) => {
-                            log::error!("[{}] Error receiving message: {}", this_clone.display_id, e);
+                            log::error!("[{}] Error receiving message: {e:#?}", self.display_id);
                             break;
                         }
                         None => break,
                     };
 
-                    log::debug!("[{}] Got client message: {}", this_clone.display_id, message);
+                    log::debug!("[{}] Got client message: {message}", self.display_id);
 
-                    if let Err(err) = this_clone.handle_client_message(message, &mut messages_tx).await {
-                        log::error!("[{}] Error handling message: {}", this_clone.display_id, err);
+                    if let Err(err) = self.handle_client_message(message).await {
+                        log::error!("[{}] Error handling message: {}", self.display_id, err);
                     }
 
-                    log::debug!("[{}] Handled client message", this_clone.display_id);
+                    log::debug!("[{}] Handled client message", self.display_id);
                 }
-                _ = stop_rx.changed() => {
-                    break
+                Some(container_message) = container_rx.recv() => {
+                    if let Err(err) = self.handle_container_message(container_message).await {
+                        log::error!("[{}] Error handling container message: {err:#?}", self.display_id);
+                    }
                 }
+                Some(request) = websocket_connections_request_rx.recv() => {
+                    let response = match self
+                        .container
+                        .create_websocket_connection(request.proxy_request)
+                        .await {
+                            Ok(response) => response,
+                            Err(err) => {
+                                log::error!("[{}] Error handling WebSocket connection request: {err:#?}", self.display_id);
+                                continue;
+                            }
+                        };
+
+                    request.tx.send(response).unwrap();
+                }
+                Some(message_to_send) = messages_rx.recv() => {
+                    let _ = ws_tx.send(message_to_send).await;
+                }
+                _ = stop_rx.changed() => break
             }
         }
 
-        log::debug!("[{}] Closing websocket", this.display_id);
+        log::debug!("[{}] Closing websocket", self.display_id);
 
-        if let Err(e) = this.container.stop().await {
+        if let Err(e) = self.container.stop().await {
             log::error!(
-                "[{}] Error trying to stop container: {}",
-                this.display_id,
-                e
+                "[{}] Error trying to stop container: {e:#?}",
+                self.display_id,
             );
         }
 
-        client_sender_task.await?;
-        container_message_task.await?;
+        proxy_requests_task.await?;
 
-        let ws_tx = maybe_ws_tx.lock().take().expect("ws_tx not given back");
         let _ = ws_rx.reunite(ws_tx)?.close().await;
 
-        this.prime_self_destruct().await;
+        self.prime_self_destruct().await;
 
         Ok(())
     }

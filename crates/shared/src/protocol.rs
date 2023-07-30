@@ -35,6 +35,9 @@ pub enum ContainerSent {
     },
 }
 
+/// This wrapper is needed because the tungstenite Message enum does not implement Serialize
+/// and we need to send it over the wire. This also provides a way to convert between axum
+/// and tungstenite messages.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum WebSocketMessage {
     Text(String),
@@ -133,9 +136,6 @@ pub enum ContainerRpcRequest {
     },
     Crash,
 }
-
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct ContainerRpcResponse {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct File {

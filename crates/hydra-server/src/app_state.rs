@@ -23,7 +23,7 @@ impl std::ops::Deref for AppState {
 }
 
 pub struct AppStateInner {
-    pub sessions: RwLock<HashMap<Uuid, Session>>,
+    pub sessions: RwLock<HashMap<Uuid, Arc<Session>>>,
     pub proxy_requests: RwLock<HashMap<Uuid, mpsc::Sender<ProxyPayload>>>,
     pub websocket_connection_requests:
         RwLock<HashMap<Uuid, mpsc::Sender<WebSocketConnectionRequest>>>,

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::session::Session;
 use crate::AppState;
 use axum::debug_handler;
@@ -46,7 +48,7 @@ pub async fn execute(
         .sessions
         .write()
         .await
-        .insert(session.ticket, session);
+        .insert(session.ticket, Arc::new(session));
 
     Ok(Json(ExecuteResponse {
         ticket: ticket.to_string(),
@@ -160,7 +162,8 @@ pub async fn execute_websocket(
         .sessions
         .write()
         .await
-        .remove(&request.ticket)
+        .get(&request.ticket)
+        .cloned()
         .ok_or_else(|| ErrorResponse::not_found("Session not found"))?;
 
     Ok(ws.on_upgrade(move |ws| async move {
@@ -177,7 +180,7 @@ pub async fn execute_websocket(
             .await
             .insert(
                 session.ticket.clone(),
-                session.websocket_connections_requests.clone(),
+                session.websocket_connections_requests_tx.clone(),
             );
 
         if let Err(err) = session.handle_websocket_connection(ws).await {
