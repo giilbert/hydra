@@ -4,3 +4,4 @@ sockets
 .env
 images
 __pycache__
+.cache

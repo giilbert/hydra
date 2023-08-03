@@ -1,5 +1,7 @@
 from utils import cmd, bail, print_header
 from dataclasses import dataclass
+from termcolor import colored
+import cache
 import json
 
 
@@ -15,12 +17,16 @@ class ImageSpec:
 
 
 def build():
+    print(f"------------ {colored('Building images', 'magenta')} ------------")
+
     with open("deploy/base/_meta.json", "r") as f:
         metadatas: list[ImageSpec] = json.load(f)
         metadatas = [ImageSpec.from_dict(metadata) for metadata in metadatas]
 
     for metadata in metadatas:
         build_metadata(metadata)
+
+    print(f"-----------------------------------------")
 
 
 def build_single(name: str):
@@ -35,6 +41,19 @@ def build_single(name: str):
 
 
 def build_metadata(metadata: ImageSpec):
+    if cache.is_fs_cached(
+        f"image-{metadata.name}",
+        [f"deploy/base/{metadata.dockerfile}", "crates/hydrad"],
+    ):
+        print(
+            f"{colored('>', 'magenta')} cache {colored('hit', 'magenta')} (`image-{metadata.name}`)"
+        )
+        return
+
+    print(
+        f"{colored('x', 'red')} cache {colored('miss', 'magenta')} (`image-{metadata.name}`)"
+    )
+
     print(f"> Building image `{metadata.name}`")
     if (
         cmd(
@@ -50,3 +69,8 @@ def build_metadata(metadata: ImageSpec):
         != 0
     ):
         bail(f"docker save for `{metadata.name}` exited with a non-zero exit code.")
+
+    cache.add_to_cache(
+        f"image-{metadata.name}",
+        [f"deploy/base/{metadata.dockerfile}", "crates/hydrad"],
+    )
