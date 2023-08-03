@@ -10,7 +10,7 @@ from build.proxy import build as build_proxy
 def setup_build_parser(parser: ArgumentParser):
     parser.add_argument(
         "component",
-        choices=["all", "image", "daemon", "server", "proxy"],
+        choices=["all", "images", "daemon", "server", "proxy"],
         default="all",
     )
 
