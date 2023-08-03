@@ -102,7 +102,11 @@ impl ContainerPool {
 
                 if let Some(sender) = popped {
                     // unreachable due to precondition
-                    let container = containers_clone.write().await.remove(&next_id).unwrap();
+                    let container = containers_clone
+                        .write()
+                        .await
+                        .remove(&next_id)
+                        .expect("container should still be in the pool");
 
                     sender
                         .send(container)

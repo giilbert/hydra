@@ -530,7 +530,7 @@ impl Container {
         {
             log::info!(
                 "[{logging_id}]: 5,0. removing docker container, state == {}",
-                state.unwrap()
+                state.expect("state should be some here")
             );
 
             if let Err(err) = DOCKER

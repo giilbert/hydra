@@ -109,19 +109,31 @@ pub async fn proxy_websocket(
         let (mut ws_tx, mut ws_rx) = ws.split();
         loop {
             tokio::select! {
-                message = ws_rx.next() => {
-                    match message {
-                        Some(Ok(message)) => tx.send(message.into()).await.unwrap(),
+                // client -> container
+                client_message = ws_rx.next() => {
+                    match client_message {
+                        Some(Ok(message)) => {
+                            if let Err(e) = tx.send(message.into()).await {
+                                log::warn!("client -> container send websocket error: {e:#?}");
+                                break;
+                            }
+                        },
                         Some(Err(e)) => {
-                            log::error!("websocket error: {}", e);
+                            log::warn!("client -> container websocket error: {}", e);
                             break;
                         },
                         None => break,
                     }
                 },
-                message = rx.recv() => {
-                    match message {
-                        Some(message) => ws_tx.send(message.into()).await.unwrap(),
+                // container -> client
+                container_message = rx.recv() => {
+                    match container_message {
+                        Some(message) => {
+                            if let Err(e) = ws_tx.send(message.into()).await {
+                                log::warn!("container -> client send websocket error: {e:#?}");
+                                break;
+                            }
+                        },
                         None => break,
                     }
                 },

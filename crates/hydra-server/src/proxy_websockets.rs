@@ -1,22 +1,16 @@
 use crate::container::{ContainerCommands, StopRx};
-use shared::{
-    prelude::*,
-    protocol::{ContainerProxyRequest, HostSent, WebSocketMessage},
-};
+use shared::protocol::{ContainerProxyRequest, HostSent, WebSocketMessage};
 use tokio::sync::{mpsc, oneshot};
-use tokio_tungstenite::tungstenite::Message;
 
 #[derive(Debug)]
 pub struct WebSocketConnection {
-    id: u32,
-
+    pub id: u32,
     // forwarded to the client
     pub rx: mpsc::Receiver<WebSocketMessage>,
     pub container_tx: mpsc::Sender<WebSocketConnectionCommands>,
 
     // received from the client
     pub tx: mpsc::Sender<WebSocketMessage>,
-    container_commands: mpsc::Sender<ContainerCommands>,
 }
 
 impl WebSocketConnection {
@@ -30,7 +24,6 @@ impl WebSocketConnection {
         let (container_tx, mut container_rx) = mpsc::channel(64);
 
         let tx_clone = client_tx.clone();
-        let container_commands_clone = container_commands.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -40,9 +33,9 @@ impl WebSocketConnection {
                             Some(WebSocketConnectionCommands::Send(data)) => {
                                 tx_clone.send(data.into()).await.ok();
                             }
-                            Some(WebSocketConnectionCommands::Close) => {
-                                break;
-                            }
+                            // Some(WebSocketConnectionCommands::Close) => {
+                            //     break;
+                            // }
                             None => {
                                 break;
                             }
@@ -52,13 +45,16 @@ impl WebSocketConnection {
                     message = client_rx.recv() => {
                         match message {
                             Some(message) => {
-                                container_commands_clone
+                                if let Err(e) = container_commands
                                     .send(ContainerCommands::SendMessage(HostSent::WebSocketMessage {
                                         id,
                                         message: WebSocketMessage::from(message),
                                     }))
                                     .await
-                                    .unwrap();
+                                {
+                                    log::warn!("client -> container send websocket error: {e:#?}");
+                                    break;
+                                }
                             }
                             None => {
                                 break;
@@ -71,7 +67,7 @@ impl WebSocketConnection {
                 }
             }
 
-            let _ = container_commands_clone
+            let _ = container_commands
                 .send(ContainerCommands::RemoveWebSocketConnection(id))
                 .await;
         });
@@ -81,14 +77,13 @@ impl WebSocketConnection {
             rx,
             tx,
             container_tx,
-            container_commands,
         }
     }
 }
 
 pub enum WebSocketConnectionCommands {
     Send(WebSocketMessage),
-    Close,
+    // Close,
 }
 
 #[derive(Debug)]

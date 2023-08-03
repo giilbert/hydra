@@ -12,10 +12,7 @@ use shared::{
     protocol::{ContainerSent, HostSent},
 };
 use std::{sync::Arc, time::Duration};
-use tokio::{
-    net::UnixStream,
-    sync::{mpsc, Mutex},
-};
+use tokio::{net::UnixStream, sync::mpsc};
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
 #[derive(Debug)]
@@ -124,9 +121,10 @@ impl Commands {
                 }
                 HostSent::WebSocketMessage { id, message } => {
                     log::info!("Received WebSocket message: [{id}] {message:?}");
-                    self.state.send_ws_message(id, message).await;
+                    let _ = self.state.send_ws_message(id, message).await;
                 }
                 HostSent::CreateWebSocketConnection(req_id, req) => {
+                    // FIXME: handle this error in case the websocket does not connect
                     let (connection_id, commands) =
                         open_websocket_connection(self.state.clone(), req)
                             .await

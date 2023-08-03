@@ -1,7 +1,7 @@
 use crate::{
     config::Environment,
     pool::ContainerPool,
-    proxy_websockets::{WebSocketConnection, WebSocketConnectionRequest},
+    proxy_websockets::WebSocketConnectionRequest,
     session::{ProxyPayload, Session},
 };
 use redis::Client;

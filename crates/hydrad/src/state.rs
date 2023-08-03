@@ -1,6 +1,6 @@
 use crate::{commands::Command, proxy::WebSocketCommands, pty::PtyCommands};
 use parking_lot::{Mutex, RwLock};
-use shared::protocol::WebSocketMessage;
+use shared::{prelude::*, protocol::WebSocketMessage};
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicU32, Ordering},
@@ -46,12 +46,13 @@ impl State {
         self.websocket_commands.read().get(&id).cloned()
     }
 
-    pub async fn send_ws_message(&self, id: u32, command: WebSocketMessage) {
+    pub async fn send_ws_message(&self, id: u32, command: WebSocketMessage) -> Result<()> {
         self.get_websocket(id)
-            .unwrap()
+            .ok_or_else(|| eyre!("No websocket found for id: {}", id))?
             .send(WebSocketCommands::Send(command))
-            .await
-            .unwrap();
+            .await?;
+
+        Ok(())
     }
 
     pub fn remove_websocket(&self, id: u32) {

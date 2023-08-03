@@ -1,6 +1,6 @@
 use crate::{commands::Command, state::State};
 use futures_util::{SinkExt, StreamExt};
-use http::Request;
+use http::{header::ToStrError, Request};
 use reqwest::{
     header::{HeaderMap, HeaderName},
     Method,
@@ -52,8 +52,11 @@ pub async fn make_proxy_request(
         headers: response
             .headers()
             .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
-            .collect::<HashMap<_, _>>(),
+            .map(|(k, v)| -> Result<(String, String), ToStrError> {
+                Ok((k.to_string(), v.to_str()?.to_string()))
+            })
+            .collect::<Result<HashMap<_, _>, ToStrError>>()
+            .map_err(|_| format!("Error parsing header value "))?,
         // TODO: no-copy
         body: response.bytes().await.map_err(|e| e.to_string())?.to_vec(),
     };
@@ -77,7 +80,7 @@ pub async fn open_websocket_connection(
         .method("GET")
         .uri(format!("ws://localhost:{}{}", req.port, req.uri))
         .body(())
-        .unwrap();
+        .map_err(|_| "Error building websocket request")?;
     let header_map = request.headers_mut();
     for (k, v) in req.headers {
         header_map.insert(
@@ -116,7 +119,7 @@ async fn run_websocket_event_loop(
             command = rx.recv() => {
                 match command {
                     Some(WebSocketCommands::Send(data)) => {
-                        ws_tx.send(data.into()).await.unwrap();
+                        ws_tx.send(data.into()).await?;
                     }
                     Some(WebSocketCommands::Close) => break,
                     None => break

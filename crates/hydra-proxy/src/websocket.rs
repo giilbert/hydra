@@ -1,14 +1,14 @@
 use futures_util::{SinkExt, StreamExt};
 use http::Request;
-use hyper::{upgrade::Upgraded, HeaderMap, Uri};
-use tokio_tungstenite::{connect_async, tungstenite::Message, WebSocketStream};
+use hyper::{upgrade::Upgraded, HeaderMap};
+use tokio_tungstenite::{connect_async, WebSocketStream};
 
 pub async fn accept_websocket_connection(
     proxy_url: String,
     headers: HeaderMap,
     ws: WebSocketStream<Upgraded>,
 ) {
-    let (mut tx, mut rx) = ws.split();
+    let (mut client_tx, mut client_rx) = ws.split();
 
     log::info!("accepted websocket connection {}", proxy_url);
 
@@ -18,15 +18,16 @@ pub async fn accept_websocket_connection(
         .method("GET")
         .uri(proxy_url.clone())
         .body(())
-        .unwrap();
+        .expect("request should be valid");
     *request.headers_mut() = headers;
 
-    let (connection, _) = connect_async(request)
-        .await
-        .map_err(|e| {
-            log::error!("{}", e.to_string());
-        })
-        .unwrap();
+    let connection = match connect_async(request).await {
+        Ok((connection, _)) => connection,
+        Err(e) => {
+            log::warn!("error connecting to container server: {}", e);
+            return;
+        }
+    };
 
     log::info!("accepted websocket connection");
 
@@ -35,42 +36,42 @@ pub async fn accept_websocket_connection(
     tokio::spawn(async move {
         loop {
             tokio::select! {
-                message = rx.next() => {
+                message = client_rx.next() => {
                     match message {
                         Some(Ok(message)) => {
-                            // log::info!("received message from client: {:?}", message);
-                            server_tx.send(message).await.unwrap();
+                            if let Err(e) = server_tx.send(message).await {
+                                log::warn!("websocket client -> server forwarding error: {e:#?}");
+                                break
+                            }
                         }
                         Some(Err(e)) => {
-                            log::error!("websocket error: {}", e);
+                            log::warn!("websocket error: {e:#?}");
                             break;
                         }
-                        None => {
-                            log::info!("client closed connection");
-                            break;
-                        }
+                        None => break
                     }
                 }
                 message = server_rx.next() => {
                     match message {
                         Some(Ok(message)) => {
-                            // log::info!("received message from server: {:?}", message);
-                            tx.send(message).await.unwrap();
+                            if let Err(e) = client_tx.send(message).await {
+                                log::warn!("websocket server -> client forwarding error: {e:#?}");
+                                break
+                            }
                         }
                         Some(Err(e)) => {
-                            log::error!("websocket error: {}", e);
-                            break;
+                            log::warn!("websocket error: {e:#?}");
+                            break
                         }
-                        None => {
-                            log::info!("server closed connection");
-                            break;
-                        }
+                        None => break
                     }
                 }
             }
         }
 
-        let mut ws = tx.reunite(rx).unwrap();
+        let mut ws = client_tx
+            .reunite(client_rx)
+            .expect("sink and stream should be from the same websocket");
         let _ = ws.close(None).await;
     });
 }

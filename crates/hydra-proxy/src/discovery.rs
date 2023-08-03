@@ -7,7 +7,9 @@ use uuid::Uuid;
 use crate::AppState;
 
 thread_local! {
-    static CACHE: RefCell<LruCache<Uuid, String>> = RefCell::new(LruCache::new(NonZeroUsize::new(10000).unwrap()));
+    static CACHE: RefCell<LruCache<Uuid, String>> = RefCell::new(LruCache::new(
+        NonZeroUsize::new(10000).expect("enter anything but 0"),
+    ));
 }
 
 pub async fn resolve_server_ip(state: &AppState, session_id: &Uuid) -> Result<String> {

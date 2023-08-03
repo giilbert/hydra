@@ -123,7 +123,9 @@ async fn create_rustls_config() -> RustlsConfig {
         )
     };
 
-    RustlsConfig::from_pem(cert_pem, key_pem).await.unwrap()
+    RustlsConfig::from_pem(cert_pem, key_pem)
+        .await
+        .expect("invalid cert/key provided")
 }
 
 async fn redirect_http_to_https(ports: Ports) {
@@ -133,7 +135,7 @@ async fn redirect_http_to_https(ports: Ports) {
         parts.scheme = Some(axum::http::uri::Scheme::HTTPS);
 
         if parts.path_and_query.is_none() {
-            parts.path_and_query = Some("/".parse().unwrap());
+            parts.path_and_query = Some("/".parse().expect("failed to parse path"));
         }
 
         let https_host = host.replace(&ports.http.to_string(), &ports.https.to_string());

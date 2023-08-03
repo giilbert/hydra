@@ -233,7 +233,11 @@ impl Session {
     /// This is a separate task since proxying requests is an expensive operation
     /// and we don't want to block the main session loop.
     async fn proxy_requests_loop(self: Arc<Self>) {
-        let mut proxy_rx = self.proxy_rx.lock().take().unwrap();
+        let mut proxy_rx = self
+            .proxy_rx
+            .lock()
+            .take()
+            .expect("proxy_rx should be Some");
         let mut stop_rx_clone = self.container.on_stop();
 
         loop {
@@ -251,7 +255,7 @@ impl Session {
                             }
                         };
 
-                    response_tx.send(response).unwrap();
+                    response_tx.send(response).expect("response_tx should be Some");
                 }
                 _ = stop_rx_clone.changed() => break
             }
@@ -266,7 +270,7 @@ impl Session {
 
         // get the ip of the machine the container is running on and store it in redis
         let machine_ip = if std::env::var("FLY_PRIVATE_IP").is_ok() {
-            std::env::var("FLY_PRIVATE_IP").unwrap()
+            std::env::var("FLY_PRIVATE_IP").expect("FLY_PRIVATE_IP should be set")
         } else {
             "localhost".to_string()
         };
@@ -283,12 +287,16 @@ impl Session {
         // this task handles proxy requests
         let proxy_requests_task = tokio::spawn(self.clone().proxy_requests_loop());
 
-        let mut messages_rx = self.message_rx.lock().take().unwrap();
+        let mut messages_rx = self
+            .message_rx
+            .lock()
+            .take()
+            .expect("message_rx should be Some");
         let mut websocket_connections_request_rx = self
             .websocket_connections_requests_rx
             .lock()
             .take()
-            .unwrap();
+            .expect("websocket_connections_request_rx should be Some");
         let mut container_rx = self.container.listen().expect("container already taken");
 
         // this task handles messages from the client
@@ -331,7 +339,9 @@ impl Session {
                             }
                         };
 
-                    request.tx.send(response).unwrap();
+                    if let Err(e) = request.tx.send(response) {
+                        log::error!("[{}] Error sending WebSocket connection response: {e:#?}", self.display_id);
+                    }
                 }
                 Some(message_to_send) = messages_rx.recv() => {
                     let _ = ws_tx.send(message_to_send).await;

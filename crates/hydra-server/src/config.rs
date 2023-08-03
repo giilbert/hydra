@@ -20,13 +20,14 @@ pub struct DockerConfig {
 
 impl Config {
     pub fn load_from_file() -> Self {
+        use std::fs;
         // first check test-config/config.toml
         // then check /etc/hydra/config.toml
         // then use default config
-        let data = if std::fs::metadata("test-config/config.toml").is_ok() {
-            Some(std::fs::read_to_string("test-config/config.toml").unwrap())
-        } else if std::fs::metadata("/etc/hydra/config.toml").is_ok() {
-            Some(std::fs::read_to_string("/etc/hydra/config.toml").unwrap())
+        let data = if fs::metadata("test-config/config.toml").is_ok() {
+            Some(fs::read_to_string("test-config/config.toml").expect("file should be present"))
+        } else if fs::metadata("/etc/hydra/config.toml").is_ok() {
+            Some(fs::read_to_string("/etc/hydra/config.toml").expect("file should be present"))
         } else {
             None
         };

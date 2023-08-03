@@ -10,12 +10,12 @@ pub struct ErrorPage {
 }
 
 impl ErrorPage {
-    pub fn not_found(message: impl Into<String>) -> Self {
-        ErrorPage {
-            status_code: StatusCode::NOT_FOUND,
-            message: message.into(),
-        }
-    }
+    // pub fn not_found(message: impl Into<String>) -> Self {
+    //     ErrorPage {
+    //         status_code: StatusCode::NOT_FOUND,
+    //         message: message.into(),
+    //     }
+    // }
 
     pub fn bad_request(message: impl Into<String>) -> Self {
         ErrorPage {
@@ -86,6 +86,6 @@ impl IntoResponse for ErrorPage {
             .status(self.status_code)
             .header("Content-Type", "text/html; charset=utf-8")
             .body(body::boxed(body))
-            .unwrap()
+            .expect("failed to render error page")
     }
 }
