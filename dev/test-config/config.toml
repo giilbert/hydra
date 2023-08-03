@@ -5,3 +5,7 @@ cpu_set = "0"
 cpu_shares = 10000
 # Memory to give each container (lowest 6MB)
 memory = "128MB"
+
+disk_read_rate = "10MB"
+disk_write_rate = "10MB"
+disk_max_size = "50MB"

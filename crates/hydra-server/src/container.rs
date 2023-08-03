@@ -5,8 +5,8 @@ use crate::{
     shutdown, Environment,
 };
 use bollard::{
-    container,
-    service::{ContainerStateStatusEnum, HostConfig},
+    container::{self, ListContainersOptions, StatsOptions},
+    service::{ContainerStateStatusEnum, HostConfig, ThrottleDevice},
     Docker,
 };
 use futures_util::{
@@ -111,7 +111,7 @@ impl Container {
                     ..Default::default()
                 }),
                 container::Config {
-                    image: Some("hydra-turtle"),
+                    image: Some("hydra-python3"),
                     host_config: Some(HostConfig {
                         binds: Some(vec![format!(
                             "{}:/run/hydra",
@@ -129,6 +129,24 @@ impl Container {
                                 .try_into()
                                 .expect("invalid memory in config"),
                         ),
+                        blkio_device_read_bps: Some(vec![ThrottleDevice {
+                            // if its running on fly, it is on the /dev/vda device
+                            path: Some(if std::env::var("FLY_PRIVATE_IP").is_ok() {
+                                "/dev/vda".to_string()
+                            } else {
+                                "/dev/sda".to_string()
+                            }),
+                            rate: Some(Config::global().docker.disk_read_rate as i64),
+                        }]),
+                        blkio_device_write_bps: Some(vec![ThrottleDevice {
+                            // if its running on fly, it is on the /dev/vda device
+                            path: Some(if std::env::var("FLY_PRIVATE_IP").is_ok() {
+                                "/dev/vda".to_string()
+                            } else {
+                                "/dev/sda".to_string()
+                            }),
+                            rate: Some(Config::global().docker.disk_write_rate as i64),
+                        }]),
                         ..Default::default()
                     }),
                     env: Some(vec!["RUST_LOG=hydrad=info"]),
@@ -204,6 +222,7 @@ impl Container {
         });
 
         tokio::spawn(container.clone().forward_logs());
+        tokio::spawn(container.clone().monitor());
         tokio::spawn(container.clone().run(ws_stream, container_commands_rx));
 
         Ok(container)
@@ -478,6 +497,45 @@ impl Container {
         }
 
         Ok(())
+    }
+
+    /// This task is responsible for monitoring the container and
+    /// killing it if it goes rogue
+    async fn monitor(self: Arc<Self>) {
+        use tokio::time;
+
+        let mut stop_rx = self.on_stop();
+
+        let max_size = Config::global().docker.disk_max_size as i64;
+
+        loop {
+            let stats = match DOCKER
+                .inspect_container(
+                    &self.docker_id,
+                    Some(container::InspectContainerOptions { size: true }),
+                )
+                .await
+            {
+                Ok(stats) => stats,
+                Err(_) => break,
+            };
+
+            if stats.size_rw.expect("size_rw should be Some") > max_size {
+                log::warn!(
+                    "[{}] Container is using too much disk space, killing it",
+                    self.display_id
+                );
+                let _ = self.stop_tx.send(());
+                break;
+            }
+
+            tokio::select! {
+                _ = time::sleep(Duration::from_secs(1)) => {},
+                _ = stop_rx.changed() => break,
+            }
+        }
+
+        let _ = self.stop_tx.send(());
     }
 
     async fn run(

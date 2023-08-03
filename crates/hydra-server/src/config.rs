@@ -16,6 +16,12 @@ pub struct DockerConfig {
     pub cpu_shares: i64,
     #[serde(with = "serde_humanize_rs")]
     pub memory: usize,
+    #[serde(with = "serde_humanize_rs")]
+    pub disk_read_rate: usize,
+    #[serde(with = "serde_humanize_rs")]
+    pub disk_write_rate: usize,
+    #[serde(with = "serde_humanize_rs")]
+    pub disk_max_size: usize,
 }
 
 impl Config {
@@ -34,14 +40,20 @@ impl Config {
 
         let config = match data {
             Some(data) => toml::from_str(&data).expect("error parsing config file"),
-            None => Config {
-                use_https: false,
-                docker: DockerConfig {
-                    cpu_set: "0".to_string(),
-                    cpu_shares: 50_000,
-                    memory: 256 * 1000 * 1000,
-                },
-            },
+            None => {
+                log::info!("Using default config...");
+                Config {
+                    use_https: false,
+                    docker: DockerConfig {
+                        cpu_set: "0".to_string(),
+                        cpu_shares: 50_000,
+                        memory: 256 * 1000 * 1000,
+                        disk_read_rate: 10 * 1000 * 1000,
+                        disk_write_rate: 10 * 1000 * 1000,
+                        disk_max_size: 50 * 1000 * 1000,
+                    },
+                }
+            }
         };
 
         log::info!("Loaded config: {:?}", config);
