@@ -11,7 +11,10 @@ use shared::{
         ExecuteOptions,
     },
 };
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
@@ -60,6 +63,8 @@ pub struct Session {
     pub display_id: String,
     pub proxy_requests: mpsc::Sender<ProxyPayload>,
     pub websocket_connections_requests_tx: mpsc::Sender<WebSocketConnectionRequest>,
+
+    pub exited: Arc<AtomicBool>,
 
     proxy_rx: Mutex<Option<mpsc::Receiver<ProxyPayload>>>,
     websocket_connections_requests_rx: Mutex<Option<mpsc::Receiver<WebSocketConnectionRequest>>>,
@@ -117,6 +122,7 @@ impl Session {
             ),
             proxy_requests: proxy_tx,
             proxy_rx: Mutex::new(Some(proxy_rx)),
+            exited: Arc::new(AtomicBool::new(false)),
             websocket_connections_requests_tx,
             websocket_connections_requests_rx: Mutex::new(Some(websocket_connections_requests_rx)),
             container,
@@ -132,6 +138,7 @@ impl Session {
         let app_state = self.app_state.clone();
         let ticket = self.ticket.clone();
         let container = self.container.clone();
+        let exited = self.exited.clone();
 
         *self.self_destruct_timer.lock() = Some(tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -143,6 +150,7 @@ impl Session {
                 .del(format!("session:{}", ticket))
                 .await
                 .expect("redis error while deleting session");
+            exited.store(true, Ordering::SeqCst);
 
             if count != 1 {
                 log::error!("error removing session from redis: count != 1");
@@ -366,5 +374,20 @@ impl Session {
         self.prime_self_destruct().await;
 
         Ok(())
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        if self.exited.load(Ordering::SeqCst) {
+            return;
+        }
+
+        log::warn!("Session dropped without being exited.");
+
+        let container = self.container.clone();
+        tokio::spawn(async move {
+            let _ = container.stop().await;
+        });
     }
 }

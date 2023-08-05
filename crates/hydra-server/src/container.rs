@@ -5,7 +5,7 @@ use crate::{
     shutdown, Environment,
 };
 use bollard::{
-    container::{self, ListContainersOptions, StatsOptions},
+    container::{self},
     service::{ContainerStateStatusEnum, HostConfig, ThrottleDevice},
     Docker,
 };
@@ -613,5 +613,18 @@ impl Container {
         }
 
         Ok(())
+    }
+}
+
+impl Drop for Container {
+    fn drop(&mut self) {
+        if self.stopped.load(Ordering::SeqCst) {
+            return;
+        }
+
+        log::warn!(
+            "Container {} dropped without being stopped first.",
+            self.docker_id
+        );
     }
 }
