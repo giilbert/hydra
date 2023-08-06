@@ -41,12 +41,12 @@ pub async fn handle_rpc_procedure(
         ContainerRpcRequest::SetupFromOptions { options } => {
             let root_path = PathBuf::from("/playground/");
 
-            for file in options.files {
-                let full_path = root_path.join(file.path);
+            for file in &options.files {
+                let full_path = root_path.join(&file.path);
                 // TODO: have better error handing for rpcs
                 let parent = full_path.parent().expect("invalid path");
                 fs::create_dir_all(parent).await?;
-                fs::write(full_path, file.content).await?;
+                fs::write(full_path, &file.content).await?;
             }
 
             Ok(Ok(().into()))

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use tokio_tungstenite::tungstenite::{protocol::CloseFrame, Message};
 use uuid::Uuid;
 
@@ -124,7 +124,7 @@ pub enum HostSent {
 #[serde(tag = "type", content = "data")]
 pub enum ContainerRpcRequest {
     SetupFromOptions {
-        options: ExecuteOptions,
+        options: Arc<ExecuteOptions>,
     },
     PtyCreate {
         command: String,

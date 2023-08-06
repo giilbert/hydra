@@ -57,7 +57,7 @@ pub async fn make_proxy_request(
             })
             .collect::<Result<HashMap<_, _>, ToStrError>>()
             .map_err(|_| format!("Error parsing header value "))?,
-        // TODO: no-copy
+        // .to_vec() will not copy the data, check the implementation
         body: response.bytes().await.map_err(|e| e.to_string())?.to_vec(),
     };
 

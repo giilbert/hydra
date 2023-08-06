@@ -276,9 +276,11 @@ impl Container {
     }
 
     pub async fn rpc_setup_from_options(&self, options: ExecuteOptions) -> Result<()> {
-        self.rpc(ContainerRpcRequest::SetupFromOptions { options })
-            .await?
-            .map_err(|e| eyre!("container failed to setup from options: {:?}", e))?;
+        self.rpc(ContainerRpcRequest::SetupFromOptions {
+            options: Arc::from(options),
+        })
+        .await?
+        .map_err(|e| eyre!("container failed to setup from options: {:?}", e))?;
 
         Ok(())
     }

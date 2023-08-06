@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 axum = { version = "0.6.18", features = ["ws"] }
-serde = { version = "1.0.152", features = ["serde_derive"] }
+serde = { version = "1.0.152", features = ["serde_derive", "rc"] }
 serde_json = "1.0.93"
 color-eyre = "0.6.2"
 uuid = { version = "1.4.1", features = ["serde"] }

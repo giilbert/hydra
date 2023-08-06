@@ -1,5 +1,5 @@
 use crate::{container::Container, proxy_websockets::WebSocketConnectionRequest, AppState};
-use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use redis::AsyncCommands;
@@ -63,7 +63,7 @@ pub struct Session {
     pub display_id: String,
     pub proxy_requests: mpsc::Sender<ProxyPayload>,
     pub websocket_connections_requests_tx: mpsc::Sender<WebSocketConnectionRequest>,
-    pub options: ExecuteOptions,
+    pub options: Arc<ExecuteOptions>,
     pub exited: Arc<AtomicBool>,
 
     proxy_rx: Mutex<Option<mpsc::Receiver<ProxyPayload>>>,
@@ -78,6 +78,7 @@ pub struct Session {
 
 impl Session {
     pub async fn new(options: ExecuteOptions, app_state: AppState) -> Result<Self> {
+        let options = Arc::new(options);
         let ticket = Uuid::new_v4();
         let container = {
             let mut recv = app_state.container_pool.take_one().await;
