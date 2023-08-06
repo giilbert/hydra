@@ -46,4 +46,5 @@ def run_build(args: Namespace):
 
 def run_build_image(args: Namespace):
     print_header(f"Building image `{args.image}`")
+    build_daemon()
     build_single_image(args.image)
