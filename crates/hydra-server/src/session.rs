@@ -294,7 +294,7 @@ impl Session {
             .redis
             .write()
             .await
-            .set(format!("session:{}", self.ticket), machine_ip)
+            .set_ex(format!("session:{}", self.ticket), machine_ip, 60 * 60 * 12)
             .await?;
 
         let (mut ws_tx, mut ws_rx) = ws.split();
