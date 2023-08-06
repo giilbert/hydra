@@ -397,8 +397,22 @@ impl Drop for Session {
         log::warn!("Session dropped without being exited.");
 
         let container = self.container.clone();
+        let app_state = self.app_state.clone();
+        let ticket = self.ticket.clone();
         tokio::spawn(async move {
             let _ = container.stop().await;
+
+            let count: u32 = app_state
+                .redis
+                .write()
+                .await
+                .del(format!("session:{}", ticket))
+                .await
+                .expect("redis error while deleting session");
+
+            if count != 1 {
+                log::error!("error removing session from redis: count != 1");
+            }
         });
     }
 }
