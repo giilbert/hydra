@@ -1,5 +1,5 @@
 use crate::{container::Container, proxy_websockets::WebSocketConnectionRequest, AppState};
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use redis::AsyncCommands;
@@ -63,7 +63,7 @@ pub struct Session {
     pub display_id: String,
     pub proxy_requests: mpsc::Sender<ProxyPayload>,
     pub websocket_connections_requests_tx: mpsc::Sender<WebSocketConnectionRequest>,
-
+    pub options: ExecuteOptions,
     pub exited: Arc<AtomicBool>,
 
     proxy_rx: Mutex<Option<mpsc::Receiver<ProxyPayload>>>,
@@ -94,7 +94,7 @@ impl Session {
 
         let result = container
             .rpc(ContainerRpcRequest::SetupFromOptions {
-                files: options.files,
+                options: options.clone(),
             })
             .await?;
 
@@ -123,6 +123,7 @@ impl Session {
             proxy_requests: proxy_tx,
             proxy_rx: Mutex::new(Some(proxy_rx)),
             exited: Arc::new(AtomicBool::new(false)),
+            options,
             websocket_connections_requests_tx,
             websocket_connections_requests_rx: Mutex::new(Some(websocket_connections_requests_rx)),
             container,
@@ -220,7 +221,8 @@ impl Session {
     }
 
     /// The container only forwards a few messages here for us to handle and send to the client.
-    async fn handle_container_message(&self, message: ContainerSent) -> Result<()> {
+    /// This function handles those messages, returning true if the session should be cleaned up.
+    async fn handle_container_message(&self, message: ContainerSent) -> Result<bool> {
         match message {
             ContainerSent::PtyOutput { output, .. } => {
                 self.send_to_client(ServerMessage::PtyOutput { output })
@@ -228,11 +230,15 @@ impl Session {
             }
             ContainerSent::PtyExit { id } => {
                 self.send_to_client(ServerMessage::PtyExit { id }).await?;
+
+                if !self.options.persistent {
+                    return Ok(true);
+                }
             }
             _ => (),
         }
 
-        Ok(())
+        Ok(false)
     }
 
     /// This function is called when a client makes a HTTP request to the proxy
@@ -331,8 +337,12 @@ impl Session {
                     log::debug!("[{}] Handled client message", self.display_id);
                 }
                 Some(container_message) = container_rx.recv() => {
-                    if let Err(err) = self.handle_container_message(container_message).await {
-                        log::error!("[{}] Error handling container message: {err:#?}", self.display_id);
+                    match self.handle_container_message(container_message).await {
+                        Ok(true) => {
+                            break;
+                        },
+                        Err(e) => log::error!("[{}] Error handling container message: {e:#?}", self.display_id),
+                        _ => (),
                     }
                 }
                 Some(request) = websocket_connections_request_rx.recv() => {

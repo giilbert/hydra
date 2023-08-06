@@ -54,7 +54,7 @@ impl AppState {
         let redis = redis_client
             .get_tokio_connection()
             .await
-            .expect("unable to create connection");
+            .expect("unable to create redis connection");
 
         AppState {
             inner: Arc::new(AppStateInner {

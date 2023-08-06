@@ -3,13 +3,20 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
 } from "react";
 import { Emitter } from "strict-event-emitter";
-import { File, getHydraUrl, Message, createRunRequest } from "./protocol";
+import {
+  File,
+  getHydraUrl,
+  ClientSent,
+  createRunRequest,
+  ServerSent,
+} from "./protocol";
 
-type HydraState = "idle" | "loading" | "running" | "error";
+type HydraState = "idle" | "loading" | "running" | "error" | "connected";
 
 interface HydraContextValue {
   status: HydraState;
@@ -43,15 +50,16 @@ export const HydraProvider: React.FC<{
 }> = ({ children }) => {
   const [status, setStatus] = useState<HydraState>("idle");
   const ws = useRef<WebSocket>();
+  const ticket = useRef<string>();
   const eventsRef = useRef<Emitter<HydraEvents>>(new Emitter());
+  const disposeRef = useRef<() => void>();
   const toast = useToast();
+  const isPersistent = true;
 
-  const run = useCallback(
+  const connect = useCallback(
     async (files: File[]) => {
-      eventsRef.current.emit("terminal:clear");
-      if (ws.current?.readyState === WebSocket.OPEN) ws.current.close();
-
       setStatus("loading");
+      console.log("connecting...");
 
       let data: { ticket: string } = undefined as any;
       try {
@@ -62,7 +70,7 @@ export const HydraProvider: React.FC<{
         console.error(e);
         toast({
           title: "Error",
-          description: "Failed to create run request. More info in console.",
+          description: "Failed to create session. More info in console.",
           status: "error",
           isClosable: true,
         });
@@ -70,78 +78,100 @@ export const HydraProvider: React.FC<{
         return;
       }
 
+      ticket.current = data.ticket;
       ws.current = new WebSocket(
-        `${getHydraUrl().replace("http", "ws")}/execute?ticket=` + data.ticket
+        `${getHydraUrl().replace("http", "ws")}/execute?ticket=` +
+          ticket.current
       );
 
-      ws.current.addEventListener("open", () => {
-        if (!ws.current) throw new Error("ws.current is null");
-        // toast({
-        //   title: "Web Gateway URL",
-        //   description: `${data.ticket}--[PORT].localhost:3101`,
-        // });
-        // setTimeout(() => {
-        //   window.open(
-        //     `http://${data.ticket}--6080.localhost:3101/vnc_lite.html`,
-        //     "_blank"
-        //   );
-        // }, 200);
-        ws.current.send(
-          JSON.stringify({
-            type: "Run",
-            data: null,
-          })
-        );
-        setStatus("running");
-      });
+      const onMessage = (event: MessageEvent) => {
+        const { type, data }: ServerSent = JSON.parse(event.data);
+        console.log("in", type, data);
 
-      ws.current.addEventListener("message", (event) => {
-        const { type, data }: Message = JSON.parse(event.data);
         if (type === "PtyOutput") {
           eventsRef.current.emit("terminal:output", data.output);
         }
-        if (type === "PtyExit") {
-          ws.current?.close(1000);
+
+        if (type === "PtyExit" && !isPersistent) {
           setStatus("idle");
         }
+      };
+
+      const onClose = (_e: CloseEvent) => {
+        console.log(`[${ticket.current?.slice(0, 5)}] Connection closed`);
+        setStatus("idle");
+      };
+
+      ws.current.addEventListener("message", onMessage);
+      ws.current.addEventListener("close", onClose);
+
+      await new Promise((resolve) => {
+        const onOpen = () => {
+          resolve(undefined);
+          ws.current?.removeEventListener("open", onOpen);
+        };
+        ws.current?.addEventListener("open", onOpen);
       });
 
-      ws.current.addEventListener("close", (e) => {
-        if (!e.wasClean) {
-          console.error(
-            `[${data.ticket.slice(0, 5)}] Not a clean close | Code: ${e.code}`
-          );
-          console.error(e);
-          setStatus("error");
-        } else {
-          console.log(
-            `[${data.ticket.slice(0, 5)}] Clean close | Code: ${e.code}`
-          );
-          setStatus("idle");
-        }
-      });
+      return () => {
+        console.log("disposing");
+        ws.current?.removeEventListener("message", onMessage);
+        ws.current?.removeEventListener("close", onClose);
+      };
     },
-    [toast]
+    [toast, isPersistent]
+  );
+
+  const sendMessage = useCallback((message: ClientSent) => {
+    if (!ws.current) throw new Error("ws.current is null");
+    console.log("out", message.type, message.data);
+    ws.current.send(JSON.stringify(message));
+  }, []);
+
+  const run = useCallback(
+    async (files: File[]) => {
+      eventsRef.current.emit("terminal:clear");
+
+      if (status !== "running" && status !== "connected") {
+        const dispose = await connect(files);
+        if (disposeRef.current) {
+          disposeRef.current();
+        }
+        disposeRef.current = dispose;
+      }
+      if (!ws.current) return;
+      if (!ticket.current) return;
+
+      sendMessage({
+        type: "Run",
+        data: undefined,
+      });
+      setStatus("running");
+    },
+    [connect, status, sendMessage]
   );
 
   const crash = useCallback(() => {
-    if (!ws.current) return;
-    ws.current.send(
-      JSON.stringify({
-        type: "Crash",
-        data: null,
-      })
-    );
-  }, []);
+    sendMessage({
+      type: "Crash",
+      data: undefined,
+    });
+  }, [sendMessage]);
 
-  const sendInput = useCallback((input: string) => {
-    if (!ws.current) return;
-    ws.current.send(
-      JSON.stringify({
+  const sendInput = useCallback(
+    (input: string) => {
+      sendMessage({
         type: "PtyInput",
         data: { id: 0, input },
-      })
-    );
+      });
+    },
+    [sendMessage]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (disposeRef.current) disposeRef.current();
+    };
   }, []);
 
   return (

@@ -7,9 +7,11 @@ const fileSchema = z.object({
   content: z.string(),
 });
 
-const requestSchema = z.object({
-  files: z.array(fileSchema),
-});
+const requestSchema = z
+  .object({
+    files: z.array(fileSchema),
+  })
+  .strict();
 
 // const handler: NextApiHandler = async (
 //   req: NextApiRequest,
@@ -65,9 +67,14 @@ const handler = async (req: NextRequest) => {
     );
   }
 
+  const options = {
+    ...body.data,
+    persistent: true,
+  };
+
   const hydraResponse = await fetch(requestUrl, {
     method: "POST",
-    body: JSON.stringify(body.data),
+    body: JSON.stringify(options),
     headers: {
       "Content-Type": "application/json",
     },
@@ -85,7 +92,7 @@ const handler = async (req: NextRequest) => {
 
   const data: { ticket: string } = await hydraResponse.json();
 
-  return NextResponse.json({ ticket: data.ticket });
+  return NextResponse.json({ ticket: data.ticket, options });
 };
 
 export default handler;

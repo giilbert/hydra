@@ -276,11 +276,9 @@ impl Container {
     }
 
     pub async fn rpc_setup_from_options(&self, options: ExecuteOptions) -> Result<()> {
-        self.rpc(ContainerRpcRequest::SetupFromOptions {
-            files: options.files,
-        })
-        .await?
-        .map_err(|e| eyre!("container failed to setup from options: {:?}", e))?;
+        self.rpc(ContainerRpcRequest::SetupFromOptions { options })
+            .await?
+            .map_err(|e| eyre!("container failed to setup from options: {:?}", e))?;
 
         Ok(())
     }
@@ -369,18 +367,26 @@ impl Container {
             }),
         );
 
-        let mut stop_rx = self.stop_rx.clone();
-
         loop {
             tokio::select! {
-                Some(Ok(msg)) = log_stream.next() => {
-                    log::info!(
-                        "[{}] [LOG]: {}",
-                        self.display_id,
-                        &msg.to_string().trim_end()
-                    );
+                msg = log_stream.next() => {
+                    match msg {
+                        Some(Ok(msg)) => {
+                            log::info!(
+                                "[{}] [LOG]: {}",
+                                self.display_id,
+                                &msg.to_string().trim_end()
+                            );
+                        }
+                        Some(Err(e)) => {
+                            log::info!("[{}] Error reading logs: {e:?}", self.display_id);
+                        }
+                        None => {
+                            log::info!("[{}] Log stream ended", self.display_id);
+                            break;
+                        }
+                    }
                 }
-                _ = stop_rx.changed() => break
             }
         }
     }
@@ -601,7 +607,7 @@ impl Container {
                 )
                 .await
             {
-                log::error!("5,0. error removing container: {:#?}", err);
+                log::warn!("5,0. error removing container: {:#?}", err);
             }
         }
 

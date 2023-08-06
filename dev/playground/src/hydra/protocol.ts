@@ -24,13 +24,19 @@ export interface Request {
   files: File[];
 }
 
-export type Message = TaggedEnum<{
+export type ClientSent = TaggedEnum<{
+  Run: undefined;
+  PtyInput: { id: number; input: string };
+  Crash: undefined;
+}>;
+
+export type ServerSent = TaggedEnum<{
   PtyOutput: { output: string };
   PtyExit: never;
 }>;
 
 export async function createRunRequest(req: Request) {
-  const res = await fetch("/api/run", {
+  const res = await fetch("/api/session", {
     method: "POST",
     body: JSON.stringify(req),
     headers: {

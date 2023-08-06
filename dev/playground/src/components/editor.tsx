@@ -81,15 +81,13 @@ export const Editor: React.FC = () => {
   return (
     <Box>
       <HStack>
-        {status !== "running" && (
-          <Button
-            onClick={onRun}
-            isLoading={status === "loading"}
-            colorScheme="green"
-          >
-            Run
-          </Button>
-        )}
+        <Button
+          onClick={onRun}
+          isLoading={status === "loading"}
+          colorScheme="green"
+        >
+          Run
+        </Button>
         {status === "running" && (
           <Button onClick={crash} colorScheme="red">
             Crash

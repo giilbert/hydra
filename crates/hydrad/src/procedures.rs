@@ -18,6 +18,7 @@ pub async fn handle_rpc_procedure(
             for arg in arguments {
                 cmd.arg(arg);
             }
+            cmd.cwd("/playground");
 
             let pty = pty::create(cmd).await?;
             let id = state.register_pty(pty.commands_tx.clone());
@@ -37,14 +38,15 @@ pub async fn handle_rpc_procedure(
 
             return Ok(Ok(json!({})));
         }
-        ContainerRpcRequest::SetupFromOptions { files } => {
-            let root_path = PathBuf::from("/root/");
+        ContainerRpcRequest::SetupFromOptions { options } => {
+            let root_path = PathBuf::from("/playground/");
 
-            for file in files {
-                let path = file.path.clone();
-                let content = file.content.clone();
-
-                fs::write(root_path.join(path), content).await?;
+            for file in options.files {
+                let full_path = root_path.join(file.path);
+                // TODO: have better error handing for rpcs
+                let parent = full_path.parent().expect("invalid path");
+                fs::create_dir_all(parent).await?;
+                fs::write(full_path, file.content).await?;
             }
 
             Ok(Ok(().into()))

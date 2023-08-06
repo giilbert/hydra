@@ -124,7 +124,7 @@ pub enum HostSent {
 #[serde(tag = "type", content = "data")]
 pub enum ContainerRpcRequest {
     SetupFromOptions {
-        files: Vec<File>,
+        options: ExecuteOptions,
     },
     PtyCreate {
         command: String,
@@ -143,8 +143,12 @@ pub struct File {
     pub content: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ExecuteOptions {
+    #[serde(default)]
+    /// Whether to keep the container alive after the
+    /// program is ran, to be used for further runs
+    pub persistent: bool,
     pub files: Vec<File>,
 }
 
