@@ -47,7 +47,7 @@ impl Config {
                     docker: DockerConfig {
                         cpu_set: "0".to_string(),
                         cpu_shares: 50_000,
-                        memory: 256 * 1000 * 1000,
+                        memory: 192 * 1000 * 1000,
                         disk_read_rate: 10 * 1000 * 1000,
                         disk_write_rate: 10 * 1000 * 1000,
                         disk_max_size: 50 * 1000 * 1000,

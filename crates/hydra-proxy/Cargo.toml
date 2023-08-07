@@ -15,7 +15,11 @@ tokio-tungstenite = "0.20.0"
 parking_lot = "0.12.1"
 tower-http = { version = "0.3.5", features = ["cors"] }
 pretty_env_logger = "0.4.0"
-redis = { version = "0.23.0", features = ["tokio", "tokio-comp"] }
+redis = { version = "0.23.0", features = [
+    "tokio",
+    "tokio-comp",
+    "tokio-rustls-comp",
+] }
 tower = "0.4.13"
 reqwest = "0.11.18"
 hyper = "0.14.27"

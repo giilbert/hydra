@@ -13,6 +13,9 @@ echo ""
 
 # Start docker service in background
 echo "> ${C_PURPLE}Booting${C_RESET} - Spawned dockerd"
+
+rm -rf /var/run/docker.pid
+
 dockerd &
 
 # Wait until the docker service is up
