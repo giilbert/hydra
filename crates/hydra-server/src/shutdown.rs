@@ -60,6 +60,25 @@ async fn cleanup(state: AppState) {
     if let Err(e) = state.container_pool.shutdown().await {
         log::error!("Failed to shutdown container pool: {}", e);
     }
+
+    log::info!("Removed all containers.");
+
+    // FIXME: this should be an immediate shutdown,
+    // but we need to wait for the sessions to be cleaned up
+    // cleaning up sessions
+
+    let sessions = state.sessions.write().await;
+    if sessions.len() != 0 {
+        log::info!("Cleaning up sessions..");
+
+        for session in sessions.values() {
+            log::info!("Primed session {} for deletion", session.ticket);
+            session.prime_self_destruct().await;
+        }
+
+        time::sleep(time::Duration::from_secs(3)).await;
+        log::info!("Done cleaning up sessions.");
+    }
 }
 
 pub async fn signal_handler(state: AppState) {
@@ -76,8 +95,9 @@ pub async fn signal_handler(state: AppState) {
     println!();
 
     log::info!("Received signal. Shutting down..");
+
     cleanup(state).await;
 
-    log::info!("Done. Exiting.");
+    log::info!("All done. Goodbye!");
     std::process::exit(0);
 }
