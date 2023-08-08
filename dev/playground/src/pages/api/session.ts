@@ -69,7 +69,7 @@ const handler = async (req: NextRequest) => {
 
   const options = {
     ...body.data,
-    persistent: true,
+    persistent: false,
   };
 
   const hydraResponse = await fetch(requestUrl, {

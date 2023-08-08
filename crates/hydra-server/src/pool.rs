@@ -18,24 +18,28 @@ static CREATING_CONTAINER_COUNT: AtomicI32 = AtomicI32::new(0);
 pub struct ContainerPool {
     pub deletion_tx: tokio::sync::mpsc::Sender<String>,
     // mapping docker id to Container
-    containers: Arc<RwLock<HashMap<String, Arc<Container>>>>,
+    all_containers: Arc<RwLock<HashMap<String, Arc<Container>>>>,
     queue: Queue,
 }
 
 impl ContainerPool {
     pub async fn new(pool_size: u32) -> Self {
         let (deletion_tx, mut deletion_rx) = mpsc::channel(500);
-        let containers = Arc::<RwLock<HashMap<String, Arc<Container>>>>::default();
+        let containers_in_pool = Arc::<RwLock<HashMap<String, Arc<Container>>>>::default();
+        let all_containers = Arc::<RwLock<HashMap<String, Arc<Container>>>>::default();
 
-        let containers_clone = containers.clone();
+        let containers_clone = containers_in_pool.clone();
         let deletion_tx_clone = deletion_tx.clone();
+        let all_containers_clone = all_containers.clone();
 
         // spawn a task that listens for container deletion events,
         // and spawns a new container if the pool is not full
         tokio::spawn(async move {
-            while let Some(_) = deletion_rx.recv().await {
+            while let Some(id) = deletion_rx.recv().await {
                 let containers_clone = containers_clone.clone();
                 let deletion_tx_clone = deletion_tx_clone.clone();
+                let all_containers_clone = all_containers_clone.clone();
+                all_containers_clone.write().await.remove(&id);
 
                 // TODO: test this?
                 let amount_after_creation = containers_clone.read().await.len() as i32
@@ -49,6 +53,10 @@ impl ContainerPool {
                             .await
                             .expect("error creating container.");
                         containers_clone
+                            .write()
+                            .await
+                            .insert(new_container.docker_id.clone(), new_container.clone());
+                        all_containers_clone
                             .write()
                             .await
                             .insert(new_container.docker_id.clone(), new_container);
@@ -66,12 +74,17 @@ impl ContainerPool {
 
             for _ in 0..pool_size {
                 let deletion_tx_clone = deletion_tx.clone();
-                let containers_clone = containers.clone();
+                let containers_clone = containers_in_pool.clone();
+                let all_containers_clone = all_containers.clone();
                 let handle = tokio::spawn(async move {
                     let new_container = Container::new(Some(deletion_tx_clone.clone()))
                         .await
                         .expect("error creating container.");
                     containers_clone
+                        .write()
+                        .await
+                        .insert(new_container.docker_id.clone(), new_container.clone());
+                    all_containers_clone
                         .write()
                         .await
                         .insert(new_container.docker_id.clone(), new_container);
@@ -85,12 +98,11 @@ impl ContainerPool {
         let queue = Queue::default();
 
         let queue_clone = queue.clone();
-        let containers_clone = containers.clone();
         tokio::spawn(async move {
             loop {
                 CONTAINER_QUEUE_NOTIFY.notified().await;
 
-                let next_id = match containers_clone.read().await.keys().next().cloned() {
+                let next_id = match containers_in_pool.read().await.keys().next().cloned() {
                     Some(id) => id,
                     None => continue,
                 };
@@ -102,7 +114,7 @@ impl ContainerPool {
 
                 if let Some(sender) = popped {
                     // unreachable due to precondition
-                    let container = containers_clone
+                    let container = containers_in_pool
                         .write()
                         .await
                         .remove(&next_id)
@@ -117,7 +129,7 @@ impl ContainerPool {
         });
 
         Self {
-            containers,
+            all_containers,
             deletion_tx,
             queue,
         }
@@ -133,7 +145,7 @@ impl ContainerPool {
     pub async fn shutdown(&self) -> Result<()> {
         use tokio::fs;
 
-        for (id, container) in self.containers.read().await.iter() {
+        for (id, container) in self.all_containers.read().await.iter() {
             fs::remove_dir_all(&container.socket_dir).await?;
             log::info!("Removed socket dir {}", id);
         }

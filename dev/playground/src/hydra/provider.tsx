@@ -54,7 +54,7 @@ export const HydraProvider: React.FC<{
   const eventsRef = useRef<Emitter<HydraEvents>>(new Emitter());
   const disposeRef = useRef<() => void>();
   const toast = useToast();
-  const isPersistent = true;
+  const isPersistent = false;
 
   const connect = useCallback(
     async (files: File[]) => {
