@@ -1,38 +1,21 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 use tokio_tungstenite::tungstenite::{protocol::CloseFrame, Message};
-use uuid::Uuid;
 
-/// Commands that are sent from the container TO THE SERVER
-#[derive(Deserialize, Serialize, Clone, Debug)]
-#[serde(tag = "type", content = "data")]
-pub enum ContainerSent {
-    Ping {
-        timestamp: u64,
-    },
-    RpcResponse {
-        id: Uuid,
-        result: String,
-    },
-    PtyOutput {
-        id: u32,
-        output: String,
-    },
-    PtyExit {
-        id: u32,
-    },
-    ProxyResponse {
-        req_id: Uuid,
-        response: Result<ContainerProxyResponse, String>,
-    },
-    WebSocketConnectionResponse {
-        req_id: Uuid,
-        id: u32,
-    },
-    WebSocketMessage {
-        id: u32,
-        message: WebSocketMessage,
-    },
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ContainerProxyRequest {
+    pub method: String,
+    pub uri: String,
+    pub port: u32,
+    pub headers: HashMap<String, String>,
+    pub body: Vec<u8>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ContainerProxyResponse {
+    pub status_code: u16,
+    pub headers: HashMap<String, String>,
+    pub body: Vec<u8>,
 }
 
 /// This wrapper is needed because the tungstenite Message enum does not implement Serialize
@@ -108,62 +91,4 @@ impl Into<axum::extract::ws::Message> for WebSocketMessage {
             WebSocketMessage::Pong(d) => Pong(d),
         }
     }
-}
-
-/// Commands that are sent from the server TO THE CONTAINER
-#[derive(Deserialize, Serialize, Clone, Debug)]
-#[serde(tag = "type", content = "data")]
-pub enum HostSent {
-    RpcRequest { id: Uuid, req: ContainerRpcRequest },
-    ProxyHTTPRequest(Uuid, ContainerProxyRequest),
-    CreateWebSocketConnection(Uuid, ContainerProxyRequest),
-    WebSocketMessage { id: u32, message: WebSocketMessage },
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(tag = "type", content = "data")]
-pub enum ContainerRpcRequest {
-    SetupFromOptions {
-        options: Arc<ExecuteOptions>,
-    },
-    PtyCreate {
-        command: String,
-        arguments: Vec<String>,
-    },
-    PtyInput {
-        id: u32,
-        input: String,
-    },
-    Crash,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct File {
-    pub path: String,
-    pub content: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ExecuteOptions {
-    #[serde(default)]
-    /// Whether to keep the container alive after the
-    /// program is ran, to be used for further runs
-    pub persistent: bool,
-    pub files: Vec<File>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ContainerProxyRequest {
-    pub method: String,
-    pub uri: String,
-    pub port: u32,
-    pub headers: HashMap<String, String>,
-    pub body: Vec<u8>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ContainerProxyResponse {
-    pub status_code: u16,
-    pub headers: HashMap<String, String>,
-    pub body: Vec<u8>,
 }
