@@ -112,7 +112,7 @@ impl Session {
         let (proxy_tx, proxy_rx) = mpsc::channel(32);
         let (websocket_connections_requests_tx, websocket_connections_requests_rx) =
             mpsc::channel(32);
-        let (messages_tx, messages_rx) = mpsc::channel::<Message>(100);
+        let (messages_tx, messages_rx) = mpsc::channel::<Message>(256);
 
         Ok(Session {
             ticket,
@@ -277,6 +277,29 @@ impl Session {
         }
     }
 
+    pub async fn handle_container_messages_loop(self: Arc<Self>) {
+        let mut container_rx = self.container.listen().expect("container already taken");
+        let mut stop_rx = self.container.on_stop();
+        loop {
+            tokio::select! {
+                Some(container_message) = container_rx.recv() => {
+                    match self.handle_container_message(container_message).await {
+                        Ok(true) => {
+                            let _ = self.container.stop().await;
+                            break;
+                        }
+                        Err(e) => log::error!(
+                            "[{}] Error handling container message: {e:#?}",
+                            self.display_id
+                        ),
+                        _ => (),
+                    }
+                }
+                _ = stop_rx.changed() => break
+            }
+        }
+    }
+
     /// This function is called when a WebSocket connection from the
     /// client (not the container) is made
     pub async fn handle_websocket_connection(self: Arc<Self>, ws: WebSocket) -> Result<()> {
@@ -301,6 +324,8 @@ impl Session {
 
         // this task handles proxy requests
         let proxy_requests_task = tokio::spawn(self.clone().proxy_requests_loop());
+        let handle_container_messages_task =
+            tokio::spawn(self.clone().handle_container_messages_loop());
 
         let mut messages_rx = self
             .message_rx
@@ -312,7 +337,6 @@ impl Session {
             .lock()
             .take()
             .expect("websocket_connections_request_rx should be Some");
-        let mut container_rx = self.container.listen().expect("container already taken");
 
         // this task handles messages from the client
         loop {
@@ -337,14 +361,8 @@ impl Session {
 
                     log::debug!("[{}] Handled client message", self.display_id);
                 }
-                Some(container_message) = container_rx.recv() => {
-                    match self.handle_container_message(container_message).await {
-                        Ok(true) => {
-                            break;
-                        },
-                        Err(e) => log::error!("[{}] Error handling container message: {e:#?}", self.display_id),
-                        _ => (),
-                    }
+                Some(message_to_send) = messages_rx.recv() => {
+                    let _ = ws_tx.send(message_to_send).await;
                 }
                 Some(request) = websocket_connections_request_rx.recv() => {
                     let response = match self
@@ -362,9 +380,6 @@ impl Session {
                         log::error!("[{}] Error sending WebSocket connection response: {e:#?}", self.display_id);
                     }
                 }
-                Some(message_to_send) = messages_rx.recv() => {
-                    let _ = ws_tx.send(message_to_send).await;
-                }
                 _ = stop_rx.changed() => break
             }
         }
@@ -379,6 +394,8 @@ impl Session {
         }
 
         proxy_requests_task.await?;
+        // client_websocket_forward_task.await?;
+        handle_container_messages_task.await?;
 
         let _ = ws_rx.reunite(ws_tx)?.close().await;
 
