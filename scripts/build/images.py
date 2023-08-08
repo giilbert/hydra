@@ -43,7 +43,7 @@ def build_single(name: str):
 def build_metadata(metadata: ImageSpec):
     if cache.is_fs_cached(
         f"image-{metadata.name}",
-        [f"deploy/base/{metadata.dockerfile}", "crates/hydrad"],
+        [f"deploy/base/{metadata.dockerfile}", "crates/hydrad", "crates/shared"],
     ):
         print(
             f"{colored('>', 'magenta')} cache {colored('hit', 'magenta')} (`image-{metadata.name}`)"
