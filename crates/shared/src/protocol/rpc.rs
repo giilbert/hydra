@@ -13,7 +13,7 @@ pub enum ContainerRpcRequest {
         arguments: Vec<String>,
     },
     PtyInput {
-        id: u32,
+        pty_id: u32,
         input: String,
     },
     Crash,

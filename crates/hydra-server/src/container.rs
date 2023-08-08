@@ -255,7 +255,7 @@ impl Container {
         log::debug!("[{}]: sent RPC request", self.display_id);
         self.commands_tx
             .send(ContainerCommands::SendMessage(HostSent::RpcRequest {
-                id,
+                req_id: id,
                 req,
             }))
             .await?;
@@ -295,7 +295,7 @@ impl Container {
     }
 
     pub async fn rpc_pty_input(&self, pty_id: u32, input: String) -> Result<()> {
-        self.rpc(ContainerRpcRequest::PtyInput { id: pty_id, input })
+        self.rpc(ContainerRpcRequest::PtyInput { pty_id, input })
             .await?
             .map_err(|e| eyre!("error inputting: {:?}", e))?;
 
@@ -306,17 +306,18 @@ impl Container {
         &self,
         req: ContainerProxyRequest,
     ) -> Result<ContainerProxyResponse> {
-        let id = Uuid::new_v4();
+        let req_id = Uuid::new_v4();
 
         log::debug!("[{}]: sent proxy request", self.display_id);
         self.commands_tx
-            .send(ContainerCommands::SendMessage(HostSent::ProxyHTTPRequest(
-                id, req,
-            )))
+            .send(ContainerCommands::SendMessage(HostSent::ProxyHTTPRequest {
+                req_id,
+                req,
+            }))
             .await?;
 
         log::debug!("[{}]: waiting for proxy response", self.display_id);
-        let await_response = self.proxy_records.lock().await_response(id)?;
+        let await_response = self.proxy_records.lock().await_response(req_id)?;
         let mut stop_rx_clone = self.stop_rx.clone();
         let response = tokio::select! {
             d = await_response => d,
@@ -334,18 +335,18 @@ impl Container {
         &self,
         req: ContainerProxyRequest,
     ) -> Result<WebSocketConnection> {
-        let id = Uuid::new_v4();
+        let req_id = Uuid::new_v4();
 
         self.commands_tx
             .send(ContainerCommands::SendMessage(
-                HostSent::CreateWebSocketConnection(id, req),
+                HostSent::CreateWebSocketConnection { req_id, req },
             ))
             .await?;
 
         let await_response = self
             .websocket_connection_request_records
             .lock()
-            .await_response(id)?;
+            .await_response(req_id)?;
 
         let mut stop_rx_clone = self.stop_rx.clone();
         let response = tokio::select! {
@@ -395,7 +396,7 @@ impl Container {
 
     async fn handle_message(&self, msg: ContainerSent) -> Result<()> {
         match msg {
-            ContainerSent::RpcResponse { id, result } => {
+            ContainerSent::RpcResponse { req_id: id, result } => {
                 let response = serde_json::from_str::<Result<Value, String>>(&result)
                     .expect("serde_json deserialize error");
                 log::debug!("Got rpc response: {:#?}", response);
@@ -419,15 +420,15 @@ impl Container {
                     );
                 };
             }
-            ContainerSent::WebSocketConnectionResponse { req_id, id } => {
+            ContainerSent::WebSocketConnectionResponse { req_id, ws_id } => {
                 let connection =
-                    WebSocketConnection::new(id, self.stop_rx.clone(), self.commands_tx.clone());
+                    WebSocketConnection::new(ws_id, self.stop_rx.clone(), self.commands_tx.clone());
                 let container_tx = connection.container_tx.clone();
 
                 self.websocket_connections
                     .write()
                     .await
-                    .insert(id, container_tx);
+                    .insert(ws_id, container_tx);
                 let mut websocket_connection_request_records =
                     self.websocket_connection_request_records.lock();
                 if let Err(err) =
@@ -439,7 +440,7 @@ impl Container {
                     );
                 };
             }
-            ContainerSent::WebSocketMessage { id, message } => {
+            ContainerSent::WebSocketMessage { ws_id: id, message } => {
                 let _ = self
                     .websocket_connections
                     .read()

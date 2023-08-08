@@ -15,7 +15,7 @@ pub struct WebSocketConnection {
 
 impl WebSocketConnection {
     pub fn new(
-        id: u32,
+        ws_id: u32,
         mut stop_rx: StopRx,
         container_commands: mpsc::Sender<ContainerCommands>,
     ) -> Self {
@@ -47,7 +47,7 @@ impl WebSocketConnection {
                             Some(message) => {
                                 if let Err(e) = container_commands
                                     .send(ContainerCommands::SendMessage(HostSent::WebSocketMessage {
-                                        id,
+                                        ws_id,
                                         message: WebSocketMessage::from(message),
                                     }))
                                     .await
@@ -68,12 +68,12 @@ impl WebSocketConnection {
             }
 
             let _ = container_commands
-                .send(ContainerCommands::RemoveWebSocketConnection(id))
+                .send(ContainerCommands::RemoveWebSocketConnection(ws_id))
                 .await;
         });
 
         Self {
-            id,
+            id: ws_id,
             rx,
             tx,
             container_tx,

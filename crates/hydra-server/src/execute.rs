@@ -120,12 +120,12 @@ pub async fn execute_headless(
         tokio::select! {
             Some(output) = container_rx.recv() => {
                 match output {
-                    ContainerSent::PtyOutput { id, output } => {
+                    ContainerSent::PtyOutput { pty_id: id, output } => {
                         if id == pty_id {
                             full_output += output.as_str();
                         }
                     }
-                    ContainerSent::PtyExit { id } => {
+                    ContainerSent::PtyExit { pty_id: id } => {
                         if id == pty_id {
                             break;
                         }

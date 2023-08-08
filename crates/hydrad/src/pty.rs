@@ -143,7 +143,7 @@ impl Pty {
             commands
                 .send(Command::Send(Message::Binary(rmp_serde::to_vec_named(
                     &ContainerSent::PtyOutput {
-                        id: self.id,
+                        pty_id: self.id,
                         output: x,
                     },
                 )?)))
@@ -156,7 +156,7 @@ impl Pty {
         commands.send(Command::RemovePty(self.id.into())).await?;
         commands
             .send(Command::Send(Message::Binary(rmp_serde::to_vec_named(
-                &ContainerSent::PtyExit { id: self.id },
+                &ContainerSent::PtyExit { pty_id: self.id },
             )?)))
             .await?;
 

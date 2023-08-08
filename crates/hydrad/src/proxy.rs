@@ -106,7 +106,7 @@ pub async fn open_websocket_connection(
 }
 
 async fn run_websocket_event_loop(
-    id: u32,
+    ws_id: u32,
     state: Arc<State>,
     connection: WebSocketStream<MaybeTlsStream<TcpStream>>,
     mut rx: mpsc::Receiver<WebSocketCommands>,
@@ -130,7 +130,7 @@ async fn run_websocket_event_loop(
                     Some(Ok(message)) => {
                         commands
                            .send(Command::Send(Message::Binary(rmp_serde::to_vec_named(
-                               &ContainerSent::WebSocketMessage { id, message: message.into() },
+                               &ContainerSent::WebSocketMessage { ws_id, message: message.into() },
                            )?)))
                            .await?;
                     }
@@ -144,7 +144,7 @@ async fn run_websocket_event_loop(
         }
     }
 
-    state.remove_websocket(id);
+    state.remove_websocket(ws_id);
 
     Ok(())
 }

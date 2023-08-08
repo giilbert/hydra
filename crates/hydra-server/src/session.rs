@@ -183,7 +183,7 @@ impl Session {
             ClientMessage::PtyInput { id, input } => {
                 if let Err(err) = self
                     .container
-                    .rpc(ContainerRpcRequest::PtyInput { id, input })
+                    .rpc(ContainerRpcRequest::PtyInput { pty_id: id, input })
                     .await?
                 {
                     log::error!("[{}] PtyInput error: {}", self.display_id, err);
@@ -229,7 +229,7 @@ impl Session {
                 self.send_to_client(ServerMessage::PtyOutput { output })
                     .await?;
             }
-            ContainerSent::PtyExit { id } => {
+            ContainerSent::PtyExit { pty_id: id } => {
                 self.send_to_client(ServerMessage::PtyExit { id }).await?;
 
                 if !self.options.persistent {

@@ -76,7 +76,7 @@ impl Commands {
             };
 
             match msg {
-                HostSent::RpcRequest { id, req } => {
+                HostSent::RpcRequest { req_id, req } => {
                     let res =
                         handle_rpc_procedure(&self.commands_tx, req, self.state.clone()).await;
 
@@ -92,7 +92,7 @@ impl Commands {
                         .send_timeout(
                             Command::Send(Message::Binary(rmp_serde::to_vec_named(
                                 &ContainerSent::RpcResponse {
-                                    id,
+                                    req_id,
                                     result: serde_json::to_string(&res)?,
                                 },
                             )?)),
@@ -102,7 +102,7 @@ impl Commands {
 
                     log::debug!("Sent RPC response: {:?}", res);
                 }
-                HostSent::ProxyHTTPRequest(req_id, req) => {
+                HostSent::ProxyHTTPRequest { req_id, req } => {
                     log::debug!("Received proxy request: {:?}", req);
                     let proxy_response = make_proxy_request(req).await;
                     log::debug!("Proxy response: {:?}", proxy_response);
@@ -119,26 +119,22 @@ impl Commands {
                         )
                         .await?;
                 }
-                HostSent::WebSocketMessage { id, message } => {
-                    log::info!("Received WebSocket message: [{id}] {message:?}");
-                    let _ = self.state.send_ws_message(id, message).await;
+                HostSent::WebSocketMessage { ws_id, message } => {
+                    log::debug!("Received WebSocket message: [{ws_id}] {message:?}");
+                    let _ = self.state.send_ws_message(ws_id, message).await;
                 }
-                HostSent::CreateWebSocketConnection(req_id, req) => {
+                HostSent::CreateWebSocketConnection { req_id, req } => {
                     // FIXME: handle this error in case the websocket does not connect
-                    let (connection_id, commands) =
-                        open_websocket_connection(self.state.clone(), req)
-                            .await
-                            .unwrap();
+                    let (ws_id, commands) = open_websocket_connection(self.state.clone(), req)
+                        .await
+                        .unwrap();
 
-                    self.state.add_websocket(connection_id, commands);
+                    self.state.add_websocket(ws_id, commands);
 
                     self.commands_tx
                         .send_timeout(
                             Command::Send(Message::Binary(rmp_serde::to_vec_named(
-                                &ContainerSent::WebSocketConnectionResponse {
-                                    req_id,
-                                    id: connection_id,
-                                },
+                                &ContainerSent::WebSocketConnectionResponse { req_id, ws_id },
                             )?)),
                             Duration::from_millis(100),
                         )

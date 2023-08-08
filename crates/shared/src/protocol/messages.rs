@@ -12,15 +12,15 @@ pub enum ContainerSent {
         timestamp: u64,
     },
     RpcResponse {
-        id: Uuid,
+        req_id: Uuid,
         result: String,
     },
     PtyOutput {
-        id: u32,
+        pty_id: u32,
         output: String,
     },
     PtyExit {
-        id: u32,
+        pty_id: u32,
     },
     ProxyResponse {
         req_id: Uuid,
@@ -28,10 +28,10 @@ pub enum ContainerSent {
     },
     WebSocketConnectionResponse {
         req_id: Uuid,
-        id: u32,
+        ws_id: u32,
     },
     WebSocketMessage {
-        id: u32,
+        ws_id: u32,
         message: WebSocketMessage,
     },
 }
@@ -40,8 +40,20 @@ pub enum ContainerSent {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum HostSent {
-    RpcRequest { id: Uuid, req: ContainerRpcRequest },
-    ProxyHTTPRequest(Uuid, ContainerProxyRequest),
-    CreateWebSocketConnection(Uuid, ContainerProxyRequest),
-    WebSocketMessage { id: u32, message: WebSocketMessage },
+    RpcRequest {
+        req_id: Uuid,
+        req: ContainerRpcRequest,
+    },
+    ProxyHTTPRequest {
+        req_id: Uuid,
+        req: ContainerProxyRequest,
+    },
+    CreateWebSocketConnection {
+        req_id: Uuid,
+        req: ContainerProxyRequest,
+    },
+    WebSocketMessage {
+        ws_id: u32,
+        message: WebSocketMessage,
+    },
 }

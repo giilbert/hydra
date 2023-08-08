@@ -27,7 +27,7 @@ pub async fn handle_rpc_procedure(
 
             return Ok(Ok(json!(id)));
         }
-        ContainerRpcRequest::PtyInput { id, input } => {
+        ContainerRpcRequest::PtyInput { pty_id: id, input } => {
             // panic!();
             let pty = state.get_pty(id).ok_or_else(|| eyre!("cannot find pty"))?;
 
