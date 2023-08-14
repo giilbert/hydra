@@ -71,11 +71,11 @@ pub struct Container {
 
     deletion_tx: Option<mpsc::Sender<String>>,
     /// Keeps track of RPC calls and is used for responses
-    rpc_records: Mutex<RpcRecords<Value>>,
+    rpc_records: Mutex<RpcRecords<Result<Value, String>>>,
     /// Keeps track of proxy requests and is used for responses
-    proxy_records: Mutex<RpcRecords<ContainerProxyResponse>>,
+    proxy_records: Mutex<RpcRecords<Result<ContainerProxyResponse, String>>>,
 
-    websocket_connection_request_records: Mutex<RpcRecords<WebSocketConnection>>,
+    websocket_connection_request_records: Mutex<RpcRecords<Result<WebSocketConnection, String>>>,
     websocket_connections: RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>,
 }
 

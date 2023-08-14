@@ -6,7 +6,7 @@ use uuid::Uuid;
 // TODO: add a max size and a timeout
 #[derive(Debug)]
 pub struct RpcRecords<T: std::fmt::Debug> {
-    pub records: HashMap<Uuid, oneshot::Sender<Result<T, String>>>,
+    pub records: HashMap<Uuid, oneshot::Sender<T>>,
 }
 
 impl<T> RpcRecords<T>
@@ -19,14 +19,14 @@ where
         }
     }
 
-    pub fn await_response(&mut self, id: Uuid) -> Result<oneshot::Receiver<Result<T, String>>> {
+    pub fn await_response(&mut self, id: Uuid) -> Result<oneshot::Receiver<T>> {
         let (tx, rx) = oneshot::channel();
         self.records.insert(id, tx);
 
         Ok(rx)
     }
 
-    pub fn handle_incoming(&mut self, id: Uuid, value: Result<T, String>) -> Result<()> {
+    pub fn handle_incoming(&mut self, id: Uuid, value: T) -> Result<()> {
         log::debug!("Got RPC response (unsorted): {:?}", value);
 
         if let Some(tx) = self.records.remove(&id) {
