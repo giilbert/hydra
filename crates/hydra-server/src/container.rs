@@ -111,7 +111,7 @@ impl Container {
                     ..Default::default()
                 }),
                 container::Config {
-                    image: Some("hydra-python3"),
+                    image: Some("hydra-turtle"),
                     host_config: Some(HostConfig {
                         binds: Some(vec![format!(
                             "{}:/run/hydra",

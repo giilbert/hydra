@@ -133,7 +133,6 @@ pub async fn handler(
         .map_err(|_| ErrorPage::bad_gateway("Error handling request. Is your program online?"))?;
 
     let mut response_headers = response.headers().clone();
-    // TODO: check that the content length is below BODY_LIMIT
     let status_code = response.status();
     let response_bytes = response.bytes().await.map_err(|e| {
         log::error!("error decoding response body: {e}");

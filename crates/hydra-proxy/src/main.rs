@@ -4,11 +4,13 @@ mod handler;
 mod websocket;
 
 use crate::handler::handler;
-use axum::handler::Handler;
+use axum::{extract::DefaultBodyLimit, handler::Handler};
 use redis::{aio::Connection, Client};
 use shared::prelude::*;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex;
+
+const MAX_BODY_SIZE: usize = 20 * 1024 * 1024; // 20 MB
 
 pub struct AppState {
     pub redis: Mutex<Connection>,
@@ -40,7 +42,12 @@ async fn main() -> Result<()> {
     log::info!("Listening on {}", addr);
 
     axum::Server::bind(&addr.into())
-        .serve(handler.with_state(Arc::new(state)).into_make_service())
+        .serve(
+            handler
+                .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
+                .with_state(Arc::new(state))
+                .into_make_service(),
+        )
         .await?;
 
     Ok(())

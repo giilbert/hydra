@@ -1,5 +1,6 @@
 use crate::{commands::Command, state::State};
-use futures_util::{SinkExt, StreamExt};
+use bytes::Bytes;
+use futures_util::{SinkExt, Stream, StreamExt};
 use http::{header::ToStrError, Request};
 use reqwest::{
     header::{HeaderMap, HeaderName},
@@ -17,9 +18,10 @@ use std::{
         Arc,
     },
 };
-use tokio::{net::TcpStream, sync::mpsc};
+use tokio::{net::TcpStream, pin, sync::mpsc};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
+const MAX_BODY_SIZE: usize = 20 * 1024 * 1024; // 20 MB
 static WEBSOCKET_ID: AtomicU32 = AtomicU32::new(0);
 
 pub async fn make_proxy_request(
@@ -57,11 +59,54 @@ pub async fn make_proxy_request(
             })
             .collect::<Result<HashMap<_, _>, ToStrError>>()
             .map_err(|_| format!("Error parsing header value "))?,
+        body: read_body(
+            response
+                .headers()
+                .get(http::header::CONTENT_LENGTH)
+                .map(|v| v.to_str().ok())
+                .flatten()
+                .map(|v| v.parse().ok())
+                .flatten(),
+            response.bytes_stream(),
+        )
+        .await?,
         // .to_vec() will not copy the data, check the implementation
-        body: response.bytes().await.map_err(|e| e.to_string())?.to_vec(),
+        // body: response.bytes().await.map_err(|e| e.to_string())?.to_vec(),
     };
 
     Ok(container_response)
+}
+
+async fn read_body(
+    content_length: Option<usize>,
+    stream: impl Stream<Item = reqwest::Result<Bytes>>,
+) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    pin!(stream);
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(chunk) => body.extend_from_slice(&chunk),
+            Err(e) => {
+                log::error!("Error reading body: {}", e);
+                return Err("error reading body".to_string());
+            }
+        }
+
+        if let Some(content_length) = content_length {
+            if body.len() >= content_length {
+                body.truncate(content_length as usize);
+                break;
+            }
+        }
+
+        if body.len() >= MAX_BODY_SIZE {
+            log::error!("Body too large");
+            return Err("body too large".to_string());
+        }
+    }
+
+    Ok(body)
 }
 
 #[derive(Deserialize)]
