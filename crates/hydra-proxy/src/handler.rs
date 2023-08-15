@@ -11,6 +11,7 @@ use axum::{
 };
 use hyper::{header, upgrade::OnUpgrade};
 use sha1::{Digest, Sha1};
+use shared::ErrorResponseBody;
 use std::sync::Arc;
 use tokio_tungstenite::{
     tungstenite::protocol::{Role, WebSocketConfig},
@@ -49,7 +50,8 @@ pub async fn handler(
         .map_err(|e| {
             log::error!("error resolving server url: {e}");
             ErrorPage::error("Something went wrong.")
-        })?;
+        })?
+        .ok_or_else(|| ErrorPage::not_found("Session not found."))?;
 
     headers.insert(
         "X-Hydra-URI",
@@ -131,6 +133,24 @@ pub async fn handler(
         .execute(request)
         .await
         .map_err(|_| ErrorPage::bad_gateway("Error handling request. Is your program online?"))?;
+
+    if response
+        .headers()
+        .get("X-Hydra-Error")
+        .is_some_and(|v| v == "true")
+    {
+        let error_response = response
+            .json::<ErrorResponseBody>()
+            .await
+            .map_err(|_| ErrorPage::error("Something went wrong."))?;
+
+        let error_page = match error_response.status {
+            502 => ErrorPage::bad_gateway(error_response.message),
+            _ => ErrorPage::error(error_response.message),
+        };
+
+        return Err(error_page);
+    }
 
     let mut response_headers = response.headers().clone();
     let status_code = response.status();

@@ -2,7 +2,10 @@ use uuid::Uuid;
 
 use crate::prelude::*;
 
-use super::{ContainerProxyRequest, ContainerProxyResponse, ContainerRpcRequest, WebSocketMessage};
+use super::{
+    ContainerProxyRequest, ContainerProxyResponse, ContainerRpcRequest, ProxyError,
+    WebSocketMessage,
+};
 
 /// Commands that are sent from the container TO THE SERVER
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -24,7 +27,7 @@ pub enum ContainerSent {
     },
     ProxyResponse {
         req_id: Uuid,
-        response: Result<ContainerProxyResponse, String>,
+        response: Result<ContainerProxyResponse, ProxyError>,
     },
     WebSocketConnectionResponse {
         req_id: Uuid,

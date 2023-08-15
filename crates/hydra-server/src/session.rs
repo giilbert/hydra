@@ -8,7 +8,7 @@ use shared::{
     prelude::*,
     protocol::{
         ContainerProxyRequest, ContainerProxyResponse, ContainerRpcRequest, ContainerSent,
-        ExecuteOptions,
+        ExecuteOptions, ProxyError,
     },
 };
 use std::sync::{
@@ -41,7 +41,7 @@ pub enum ServerMessage {
 
 pub type ProxyPayload = (
     ContainerProxyRequest,
-    oneshot::Sender<ContainerProxyResponse>,
+    oneshot::Sender<Result<ContainerProxyResponse, ProxyError>>,
 );
 
 /// Where all the magic happens
@@ -258,18 +258,7 @@ impl Session {
         loop {
             tokio::select! {
                 Some((req, response_tx)) = proxy_rx.recv() => {
-                    // TODO: handle error
-                    let response = match self
-                        .container
-                        .proxy_request(req)
-                        .await {
-                            Ok(response) => response,
-                            Err(err) => {
-                                log::error!("[{}] Error handling proxy request: {err:#?}", self.display_id);
-                                continue;
-                            }
-                        };
-
+                    let response = self.container.proxy_request(req).await;
                     response_tx.send(response).expect("response_tx should be Some");
                 }
                 _ = stop_rx_clone.changed() => break

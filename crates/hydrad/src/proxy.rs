@@ -8,7 +8,9 @@ use reqwest::{
 };
 use shared::{
     prelude::*,
-    protocol::{ContainerProxyRequest, ContainerProxyResponse, ContainerSent, WebSocketMessage},
+    protocol::{
+        ContainerProxyRequest, ContainerProxyResponse, ContainerSent, ProxyError, WebSocketMessage,
+    },
 };
 use std::{
     collections::HashMap,
@@ -26,15 +28,19 @@ static WEBSOCKET_ID: AtomicU32 = AtomicU32::new(0);
 
 pub async fn make_proxy_request(
     req: ContainerProxyRequest,
-) -> Result<ContainerProxyResponse, String> {
-    let method = Method::try_from(req.method.as_str()).map_err(|e| e.to_string())?;
+) -> Result<ContainerProxyResponse, ProxyError> {
+    let method = Method::try_from(req.method.as_str()).map_err(|_| {
+        ProxyError::RequestError(format!("Invalid method: {}", req.method.as_str()))
+    })?;
     let url = format!("http://localhost:{}{}", req.port, req.uri);
     let mut headers = HeaderMap::new();
 
     for (k, v) in req.headers {
         headers.insert(
-            HeaderName::from_str(&k).map_err(|_| "Error parsing header name")?,
-            v.parse().map_err(|_| "Error parsing header value")?,
+            HeaderName::from_str(&k)
+                .map_err(|_| ProxyError::RequestError("Error parsing header name".into()))?,
+            v.parse()
+                .map_err(|_| ProxyError::RequestError("Error parsing header value".into()))?,
         );
     }
 
@@ -47,7 +53,7 @@ pub async fn make_proxy_request(
         .body(req.body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| ProxyError::UserProgramError(e.to_string()))?;
 
     let container_response = ContainerProxyResponse {
         status_code: response.status().as_u16(),
@@ -58,7 +64,7 @@ pub async fn make_proxy_request(
                 Ok((k.to_string(), v.to_str()?.to_string()))
             })
             .collect::<Result<HashMap<_, _>, ToStrError>>()
-            .map_err(|_| format!("Error parsing header value "))?,
+            .map_err(|_| ProxyError::RequestError("Invalid headers".into()))?,
         body: read_body(
             response
                 .headers()
@@ -70,8 +76,6 @@ pub async fn make_proxy_request(
             response.bytes_stream(),
         )
         .await?,
-        // .to_vec() will not copy the data, check the implementation
-        // body: response.bytes().await.map_err(|e| e.to_string())?.to_vec(),
     };
 
     Ok(container_response)
@@ -80,7 +84,7 @@ pub async fn make_proxy_request(
 async fn read_body(
     content_length: Option<usize>,
     stream: impl Stream<Item = reqwest::Result<Bytes>>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ProxyError> {
     let mut body = Vec::new();
     pin!(stream);
 
@@ -89,7 +93,7 @@ async fn read_body(
             Ok(chunk) => body.extend_from_slice(&chunk),
             Err(e) => {
                 log::error!("Error reading body: {}", e);
-                return Err("error reading body".to_string());
+                return Err(ProxyError::BodyReadError(e.to_string()));
             }
         }
 
@@ -102,7 +106,7 @@ async fn read_body(
 
         if body.len() >= MAX_BODY_SIZE {
             log::error!("Body too large");
-            return Err("body too large".to_string());
+            return Err(ProxyError::BodyTooLarge);
         }
     }
 

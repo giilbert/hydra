@@ -10,7 +10,10 @@ use axum::{
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
-use shared::{protocol::ContainerProxyRequest, ErrorResponse};
+use shared::{
+    protocol::{ContainerProxyRequest, ProxyError},
+    ErrorResponse,
+};
 use std::{collections::HashMap, str::FromStr};
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -36,13 +39,13 @@ pub async fn proxy_http(
         .read()
         .await
         .get(&session_id.into())
-        .ok_or_else(|| ErrorResponse::not_found("Container not found"))?
+        .ok_or_else(|| ErrorResponse::not_found("Session not found"))?
         .clone();
 
     let request = ContainerProxyRequest {
         method: method.to_string(),
         uri: uri.to_string(),
-        // FIXME: is there a way to not clone the underlying byte representation?
+        // to_vec does not clone, check the method impl
         body: body.to_vec(),
         headers: parse_client_headers(&headers)?,
         port: port.into(),
@@ -59,10 +62,26 @@ pub async fn proxy_http(
         .await
         .map_err(|_| ErrorResponse::error("Failed to receiver response from container proxy"))?;
 
-    let headers = parse_container_headers(&res.headers)?;
-    let status_code = StatusCode::try_from(res.status_code)
-        .map_err(|_| ErrorResponse::bad_gateway("container sent invalid status code"))?;
-    Ok((status_code, headers, res.body))
+    match res {
+        Ok(res) => {
+            let headers = parse_container_headers(&res.headers)?;
+            let status_code = StatusCode::try_from(res.status_code)
+                .map_err(|_| ErrorResponse::bad_gateway("container sent invalid status code"))?;
+
+            return Ok((status_code, headers, res.body));
+        }
+        Err(e) => match e {
+            ProxyError::InternalError => {
+                return Err(ErrorResponse::error(
+                    "Something broke in an unexpected way.",
+                ));
+            }
+            e => {
+                // TODO: format in non-robot form
+                return Err(ErrorResponse::bad_gateway(format!("{:#?}", e)));
+            }
+        },
+    }
 }
 
 #[axum::debug_handler]
@@ -83,7 +102,6 @@ pub async fn proxy_websocket(
     let request = ContainerProxyRequest {
         method: "GET".to_string(),
         uri: uri.to_string(),
-        // FIXME: is there a way to not clone the underlying byte representation?
         body: vec![],
         headers: parse_client_headers(&headers)?,
         port: port.into(),
@@ -95,7 +113,7 @@ pub async fn proxy_websocket(
         .read()
         .await
         .get(&session_id.into())
-        .ok_or_else(|| ErrorResponse::not_found("Container not found"))?
+        .ok_or_else(|| ErrorResponse::not_found("Session not found"))?
         .send(req)
         .await
         .map_err(|_| ErrorResponse::error("Failed to send request to container proxy"))?;

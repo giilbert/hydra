@@ -19,11 +19,10 @@ where
         }
     }
 
-    pub fn await_response(&mut self, id: Uuid) -> Result<oneshot::Receiver<T>> {
+    pub fn await_response(&mut self, id: Uuid) -> oneshot::Receiver<T> {
         let (tx, rx) = oneshot::channel();
         self.records.insert(id, tx);
-
-        Ok(rx)
+        rx
     }
 
     pub fn handle_incoming(&mut self, id: Uuid, value: T) -> Result<()> {

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, error::Error};
 use tokio_tungstenite::tungstenite::{protocol::CloseFrame, Message};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -16,6 +16,27 @@ pub struct ContainerProxyResponse {
     pub status_code: u16,
     pub headers: HashMap<String, String>,
     pub body: Vec<u8>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum ProxyError {
+    InternalError,
+    RequestError(String),
+    UserProgramError(String),
+    BodyReadError(String),
+    BodyTooLarge,
+}
+
+impl ProxyError {
+    pub fn server_error<F, E>(message: impl ToString) -> impl Fn(E) -> Self
+    where
+        E: Error,
+    {
+        move |e| {
+            log::error!("{}: {e}", message.to_string());
+            Self::InternalError
+        }
+    }
 }
 
 /// This wrapper is needed because the tungstenite Message enum does not implement Serialize

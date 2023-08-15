@@ -20,6 +20,7 @@ type HydraState = "idle" | "loading" | "running" | "error" | "connected";
 
 interface HydraContextValue {
   status: HydraState;
+  ticket?: string;
   run: (files: File[]) => void;
   crash: () => void;
   sendInput: (input: string) => void;
@@ -33,6 +34,7 @@ type HydraEvents = {
 
 const HydraContext = createContext<HydraContextValue>({
   status: "idle",
+  ticket: undefined,
   run: () => {},
   crash: () => {},
   sendInput: () => {},
@@ -178,6 +180,7 @@ export const HydraProvider: React.FC<{
     <HydraContext.Provider
       value={{
         status,
+        ticket: ticket.current,
         run,
         crash,
         sendInput,

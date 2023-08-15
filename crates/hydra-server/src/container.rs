@@ -20,7 +20,7 @@ use shared::{
     prelude::*,
     protocol::{
         ContainerProxyRequest, ContainerProxyResponse, ContainerRpcRequest, ContainerSent,
-        ExecuteOptions, HostSent,
+        ExecuteOptions, HostSent, ProxyError,
     },
 };
 use std::{
@@ -35,7 +35,10 @@ use std::{
 use tokio::{
     fs,
     net::{UnixListener, UnixStream},
-    sync::{mpsc, watch, RwLock},
+    sync::{
+        mpsc::{self, error::SendError},
+        watch, RwLock,
+    },
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
@@ -73,9 +76,10 @@ pub struct Container {
     /// Keeps track of RPC calls and is used for responses
     rpc_records: Mutex<RpcRecords<Result<Value, String>>>,
     /// Keeps track of proxy requests and is used for responses
-    proxy_records: Mutex<RpcRecords<Result<ContainerProxyResponse, String>>>,
+    proxy_records: Mutex<RpcRecords<Result<ContainerProxyResponse, ProxyError>>>,
 
-    websocket_connection_request_records: Mutex<RpcRecords<Result<WebSocketConnection, String>>>,
+    websocket_connection_request_records:
+        Mutex<RpcRecords<Result<WebSocketConnection, ProxyError>>>,
     websocket_connections: RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>,
 }
 
@@ -261,7 +265,7 @@ impl Container {
             .await?;
 
         log::debug!("[{}]: waiting for RPC response", self.display_id);
-        let await_response = self.rpc_records.lock().await_response(id)?;
+        let await_response = self.rpc_records.lock().await_response(id);
         let mut stop_rx_clone = self.stop_rx.clone();
         let response = tokio::select! {
             d = await_response => d,
@@ -305,7 +309,7 @@ impl Container {
     pub async fn proxy_request(
         &self,
         req: ContainerProxyRequest,
-    ) -> Result<ContainerProxyResponse> {
+    ) -> Result<ContainerProxyResponse, ProxyError> {
         let req_id = Uuid::new_v4();
 
         log::debug!("[{}]: sent proxy request", self.display_id);
@@ -314,49 +318,72 @@ impl Container {
                 req_id,
                 req,
             }))
-            .await?;
+            .await
+            .map_err(ProxyError::server_error::<
+                fn(SendError<ContainerCommands>) -> ProxyError,
+                _,
+            >("failed to send proxy request message"))?;
 
         log::debug!("[{}]: waiting for proxy response", self.display_id);
-        let await_response = self.proxy_records.lock().await_response(req_id)?;
+        let await_response = self.proxy_records.lock().await_response(req_id);
+
         let mut stop_rx_clone = self.stop_rx.clone();
         let response = tokio::select! {
             d = await_response => d,
-            _ = tokio::time::sleep(Duration::from_secs(10)) => bail!("container failed to respond to RPC in 10 seconds"),
-            _ = stop_rx_clone.changed() => bail!("container stopped during RPC")
+            _ = tokio::time::sleep(Duration::from_secs(10)) => {
+                return Err(ProxyError::UserProgramError("program failed to respond in 10s".into()));
+            }
+            _ = stop_rx_clone.changed() => {
+                return Err(ProxyError::InternalError);
+            }
         };
-        let res = response?;
+        let res = response.map_err(ProxyError::server_error::<
+            fn(SendError<ContainerCommands>) -> ProxyError,
+            _,
+        >("error receiving"))?;
 
         log::debug!("[{}]: got proxy response", self.display_id);
 
-        res.map_err(|e| eyre!("container failed to proxy: {:?}", e))
+        res
     }
 
     pub async fn create_websocket_connection(
         &self,
         req: ContainerProxyRequest,
-    ) -> Result<WebSocketConnection> {
+    ) -> Result<WebSocketConnection, ProxyError> {
         let req_id = Uuid::new_v4();
 
         self.commands_tx
             .send(ContainerCommands::SendMessage(
                 HostSent::CreateWebSocketConnection { req_id, req },
             ))
-            .await?;
+            .await
+            .map_err(ProxyError::server_error::<
+                fn(SendError<ContainerCommands>) -> ProxyError,
+                _,
+            >("failed to send proxy request message"))?;
 
         let await_response = self
             .websocket_connection_request_records
             .lock()
-            .await_response(req_id)?;
+            .await_response(req_id);
 
         let mut stop_rx_clone = self.stop_rx.clone();
         let response = tokio::select! {
             d = await_response => d,
-            _ = tokio::time::sleep(Duration::from_secs(10)) => bail!("container failed to respond to RPC in 10 seconds"),
-            _ = stop_rx_clone.changed() => bail!("container stopped during RPC")
+            _ = tokio::time::sleep(Duration::from_secs(10)) => {
+                return Err(ProxyError::UserProgramError("program failed to respond in 10s".into()));
+            }
+            _ = stop_rx_clone.changed() => {
+                return Err(ProxyError::InternalError);
+            }
         };
-        let res = response?;
+        let res = response.map_err(ProxyError::server_error::<
+            fn(SendError<ContainerCommands>) -> ProxyError,
+            _,
+        >("error receiving"))?;
 
-        res.map_err(|e| eyre!("container failed to create websocket connection: {:?}", e))
+        res
     }
 
     async fn forward_logs(self: Arc<Self>) {

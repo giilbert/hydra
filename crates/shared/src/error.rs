@@ -1,8 +1,18 @@
-use axum::{http::StatusCode, response::IntoResponse};
+use crate::prelude::*;
+use axum::{
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+};
 use serde_json::json;
 
 pub struct ErrorResponse {
     pub status_code: StatusCode,
+    pub message: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ErrorResponseBody {
+    pub status: u16,
     pub message: String,
 }
 
@@ -50,6 +60,9 @@ impl IntoResponse for ErrorResponse {
             "message": self.message,
         }));
 
-        (self.status_code, body).into_response()
+        let mut headers = HeaderMap::new();
+        headers.append("X-Hydra-Error", "true".parse().unwrap());
+
+        (self.status_code, headers, body).into_response()
     }
 }

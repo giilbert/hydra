@@ -13,35 +13,36 @@ import {
 } from "@chakra-ui/react";
 import { python } from "@codemirror/lang-python";
 import ReactCodeMirror from "@uiw/react-codemirror";
+import Link from "next/link";
 import { useCallback, useState } from "react";
 
 export const Editor: React.FC = () => {
-  const { run, crash, status } = useHydra();
+  const { run, crash, status, ticket } = useHydra();
+  // const [files, setFiles] = useState<File[]>([
+  //   {
+  //     path: "main.py",
+  //     content: `print("Hello world!")`,
+  //   },
+  // ]);
   const [files, setFiles] = useState<File[]>([
     {
       path: "main.py",
-      content: `print("Hello world!")`,
+      content: `from turtle import Turtle
+from time import sleep
+from random import random
+
+sleep(1)
+
+t = Turtle()
+
+while True:
+  t.forward(100)
+  t.left(179)
+  # change the pen color to a random color
+  t.color(random(), random(), random())
+  `,
     },
   ]);
-  //   const [files, setFiles] = useState<File[]>([
-  //     {
-  //       path: "main.py",
-  //       content: `from turtle import Turtle
-  // from time import sleep
-  // from random import random
-
-  // sleep(1)
-
-  // t = Turtle()
-
-  // while True:
-  //   t.forward(100)
-  //   t.left(179)
-  //   # change the pen color to a random color
-  //   t.color(random(), random(), random())
-  // `,
-  //     },
-  //   ]);
   const [selectedFile, setSelectedFile] = useState<string>("main.py");
   const [input, setInput] = useState<string>("");
   const { colorMode } = useColorMode();
@@ -89,9 +90,18 @@ export const Editor: React.FC = () => {
           Run
         </Button>
         {status === "running" && (
-          <Button onClick={crash} colorScheme="red">
-            Crash
-          </Button>
+          <>
+            <Button onClick={crash} colorScheme="red" mr="2">
+              Crash
+            </Button>
+            <Link
+              href={`http://${ticket}--6080.localhost:3101`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Proxy Link (port 6080)
+            </Link>
+          </>
         )}
 
         <Box my="2" ml="auto">

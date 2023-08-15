@@ -1,4 +1,7 @@
-use crate::AppState;
+use crate::{
+    config::{Config, Environment},
+    AppState,
+};
 use axum::{http::Request, middleware::Next, response::Response};
 use std::{
     sync::atomic::{AtomicU64, Ordering},
@@ -28,6 +31,12 @@ pub fn update_last_activity() {
 }
 
 pub async fn run_check_test(state: AppState) {
+    if Environment::get() == Environment::Development {
+        return;
+    }
+
+    log::info!("This server will automatically shut down after {TIME} seconds of inactivity.",);
+
     LAST_REQUEST_TIME.store(
         std::time::SystemTime::now()
             .duration_since(UNIX_EPOCH)
