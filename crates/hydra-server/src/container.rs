@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     proxy_websockets::{WebSocketConnection, WebSocketConnectionCommands},
-    rpc::RpcRecords,
+    rpc::{RpcError, RpcRecords},
     shutdown, Environment,
 };
 use bollard::{
@@ -74,12 +74,11 @@ pub struct Container {
 
     deletion_tx: Option<mpsc::Sender<String>>,
     /// Keeps track of RPC calls and is used for responses
-    rpc_records: Mutex<RpcRecords<Result<Value, String>>>,
+    rpc_records: RpcRecords<Result<Value, String>>,
     /// Keeps track of proxy requests and is used for responses
-    proxy_records: Mutex<RpcRecords<Result<ContainerProxyResponse, ProxyError>>>,
+    proxy_records: RpcRecords<Result<ContainerProxyResponse, ProxyError>>,
 
-    websocket_connection_request_records:
-        Mutex<RpcRecords<Result<WebSocketConnection, ProxyError>>>,
+    websocket_connection_request_records: RpcRecords<Result<WebSocketConnection, ProxyError>>,
     websocket_connections: RwLock<HashMap<u32, mpsc::Sender<WebSocketConnectionCommands>>>,
 }
 
@@ -201,9 +200,9 @@ impl Container {
 
         let (container_commands_tx, container_commands_rx) = mpsc::channel::<ContainerCommands>(32);
 
-        let rpc_records = Mutex::new(RpcRecords::new());
-        let proxy_records = Mutex::new(RpcRecords::new());
-        let websocket_connection_request_records = Mutex::new(RpcRecords::new());
+        let rpc_records = RpcRecords::new(stop_rx.clone());
+        let proxy_records = RpcRecords::new(stop_rx.clone());
+        let websocket_connection_request_records = RpcRecords::new(stop_rx.clone());
         let websocket_connections = RwLock::new(HashMap::new());
 
         let (container_message_tx, container_message_rx) = mpsc::channel::<ContainerSent>(64);
@@ -265,15 +264,7 @@ impl Container {
             .await?;
 
         log::debug!("[{}]: waiting for RPC response", self.display_id);
-        let await_response = self.rpc_records.lock().await_response(id);
-        let mut stop_rx_clone = self.stop_rx.clone();
-        let response = tokio::select! {
-            d = await_response => d,
-            _ = tokio::time::sleep(Duration::from_secs(10)) => bail!("container failed to respond to RPC in 10 seconds"),
-            _ = stop_rx_clone.changed() => bail!("container stopped during RPC")
-        };
-        let res = response?;
-
+        let res = self.rpc_records.get_response(id).await?;
         log::debug!("[{}]: got RPC response", self.display_id);
 
         Ok(res)
@@ -325,26 +316,24 @@ impl Container {
             >("failed to send proxy request message"))?;
 
         log::debug!("[{}]: waiting for proxy response", self.display_id);
-        let await_response = self.proxy_records.lock().await_response(req_id);
 
-        let mut stop_rx_clone = self.stop_rx.clone();
-        let response = tokio::select! {
-            d = await_response => d,
-            _ = tokio::time::sleep(Duration::from_secs(10)) => {
-                return Err(ProxyError::UserProgramError("program failed to respond in 10s".into()));
-            }
-            _ = stop_rx_clone.changed() => {
-                return Err(ProxyError::InternalError);
-            }
-        };
-        let res = response.map_err(ProxyError::server_error::<
-            fn(SendError<ContainerCommands>) -> ProxyError,
-            _,
-        >("error receiving"))?;
+        let response = self
+            .proxy_records
+            .get_response(req_id)
+            .await
+            .map_err(|e| match e {
+                RpcError::Timeout => {
+                    ProxyError::UserProgramError("program failed to respond before timeout".into())
+                }
+                _ => {
+                    log::error!("error receiving websocket connection response: {:?}", e);
+                    ProxyError::InternalError
+                }
+            })?;
 
         log::debug!("[{}]: got proxy response", self.display_id);
 
-        res
+        response
     }
 
     pub async fn create_websocket_connection(
@@ -363,27 +352,21 @@ impl Container {
                 _,
             >("failed to send proxy request message"))?;
 
-        let await_response = self
+        let response = self
             .websocket_connection_request_records
-            .lock()
-            .await_response(req_id);
+            .get_response(req_id)
+            .await
+            .map_err(|e| match e {
+                RpcError::Timeout => {
+                    ProxyError::UserProgramError("program failed to respond before timeout".into())
+                }
+                _ => {
+                    log::error!("error receiving websocket connection response: {:?}", e);
+                    ProxyError::InternalError
+                }
+            })?;
 
-        let mut stop_rx_clone = self.stop_rx.clone();
-        let response = tokio::select! {
-            d = await_response => d,
-            _ = tokio::time::sleep(Duration::from_secs(10)) => {
-                return Err(ProxyError::UserProgramError("program failed to respond in 10s".into()));
-            }
-            _ = stop_rx_clone.changed() => {
-                return Err(ProxyError::InternalError);
-            }
-        };
-        let res = response.map_err(ProxyError::server_error::<
-            fn(SendError<ContainerCommands>) -> ProxyError,
-            _,
-        >("error receiving"))?;
-
-        res
+        response
     }
 
     async fn forward_logs(self: Arc<Self>) {
@@ -427,9 +410,8 @@ impl Container {
                 let response = serde_json::from_str::<Result<Value, String>>(&result)
                     .expect("serde_json deserialize error");
                 log::debug!("Got rpc response: {:#?}", response);
-                let mut rpc_records = self.rpc_records.lock();
                 log::debug!("Handling rpc response");
-                if let Err(err) = rpc_records.handle_incoming(id, response) {
+                if let Err(err) = self.rpc_records.handle_incoming(id, response) {
                     log::error!(
                         "[{}] Error handling rpc response: {err:#?}",
                         self.display_id
@@ -438,9 +420,8 @@ impl Container {
             }
             ContainerSent::ProxyResponse { req_id, response } => {
                 // log::debug!("Got rpc response: {:#?}", response);
-                let mut proxy_records = self.proxy_records.lock();
                 // log::debug!("Handling proxy response");
-                if let Err(err) = proxy_records.handle_incoming(req_id, response) {
+                if let Err(err) = self.proxy_records.handle_incoming(req_id, response) {
                     log::error!(
                         "[{}] Error handling proxy response: {err:#?}",
                         self.display_id
@@ -456,10 +437,9 @@ impl Container {
                     .write()
                     .await
                     .insert(ws_id, container_tx);
-                let mut websocket_connection_request_records =
-                    self.websocket_connection_request_records.lock();
-                if let Err(err) =
-                    websocket_connection_request_records.handle_incoming(req_id, Ok(connection))
+                if let Err(err) = self
+                    .websocket_connection_request_records
+                    .handle_incoming(req_id, Ok(connection))
                 {
                     log::error!(
                         "[{}] Error handling websocket connection response: {err:#?}",
