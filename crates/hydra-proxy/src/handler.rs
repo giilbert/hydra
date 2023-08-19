@@ -166,6 +166,9 @@ pub async fn handler(
 
         let error_page = match error_response.status {
             502 => ErrorPage::bad_gateway(error_response.message),
+            400 => ErrorPage::bad_request(error_response.message),
+            401 => ErrorPage::unauthorized(error_response.message),
+            404 => ErrorPage::not_found(error_response.message),
             _ => ErrorPage::error(error_response.message),
         };
 

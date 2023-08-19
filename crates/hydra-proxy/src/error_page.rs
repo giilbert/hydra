@@ -37,6 +37,13 @@ impl ErrorPage {
             message: message.into(),
         }
     }
+
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        ErrorPage {
+            status_code: StatusCode::UNAUTHORIZED,
+            message: message.into(),
+        }
+    }
 }
 
 fn create_html(status_code: StatusCode, message: &str) -> String {
