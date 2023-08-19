@@ -42,10 +42,6 @@ const requestSchema = z
 //   return res.json(data);
 // };
 
-export const config = {
-  runtime: "edge",
-};
-
 const handler = async (req: NextRequest) => {
   const url = getHydraUrl();
   const requestUrl =
