@@ -129,10 +129,10 @@ pub async fn handler(
             ErrorPage::error("Error constructing forwarded request.")
         })?;
 
-    let response = client
-        .execute(request)
-        .await
-        .map_err(|_| ErrorPage::bad_gateway("Error handling request. Is your program online?"))?;
+    let response = client.execute(request).await.map_err(|e| {
+        log::error!("{e:#?}");
+        ErrorPage::bad_gateway("Error handling request. Is your program online?")
+    })?;
 
     if response
         .headers()

@@ -11,6 +11,7 @@ services:
     environment:
       - ENVIRONMENT=development
       - REDIS_URL=redis://redis:6379
+      - DOCKER=1
     tty: true
     ports:
       - "3100:3100"
@@ -20,11 +21,26 @@ services:
         target: /etc/hydra/config.toml
     networks:
       - hydra
+    depends_on:
+      - redis
+  hydra-proxy:
+    container_name: "hydra-proxy"
+    image: "hydra-proxy:latest"
+    environment:
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "3101:3101"
+    networks:
+      - hydra
+    depends_on:
+      - redis
   redis:
     container_name: redis
     image: redis
     networks:
       - hydra
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
 
 networks:
   hydra:

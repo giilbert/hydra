@@ -259,7 +259,7 @@ impl Session {
             tokio::select! {
                 Some((req, response_tx)) = proxy_rx.recv() => {
                     let response = self.container.proxy_request(req).await;
-                    response_tx.send(response).expect("response_tx should be Some");
+                    let _ = response_tx.send(response);
                 }
                 _ = stop_rx_clone.changed() => break
             }
@@ -298,6 +298,8 @@ impl Session {
         // get the ip of the machine the container is running on and store it in redis
         let machine_ip = if std::env::var("FLY_PRIVATE_IP").is_ok() {
             std::env::var("FLY_PRIVATE_IP").expect("FLY_PRIVATE_IP should be set")
+        } else if std::env::var("DOCKER").is_ok() {
+            "hydra-server".to_string()
         } else {
             "localhost".to_string()
         };
