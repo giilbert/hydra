@@ -152,7 +152,7 @@ impl Container {
                         }]),
                         ..Default::default()
                     }),
-                    env: Some(vec!["RUST_LOG=hydrad=info"]),
+                    // env: Some(vec!["RUST_LOG=hydrad=info"]),
                     ..Default::default()
                 },
             )
@@ -224,7 +224,7 @@ impl Container {
             websocket_connections,
         });
 
-        tokio::spawn(container.clone().forward_logs());
+        // tokio::spawn(container.clone().forward_logs());
         tokio::spawn(container.clone().monitor());
         tokio::spawn(container.clone().run(ws_stream, container_commands_rx));
 

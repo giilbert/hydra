@@ -5,19 +5,19 @@ primary_region = "ewr"
 image = "registry.fly.io/hydra-server"
 
 [[services]]
-    internal_port = 3100
-    protocol = "tcp"
-    auto_stop_machines = true
-    auto_start_machines = true
-    min_machines_running = 0
+internal_port = 3100
+protocol = "tcp"
+auto_stop_machines = true
+auto_start_machines = true
+min_machines_running = 0
 
 [[services.ports]]
-    handlers = ["tls", "http"]
-    port = "443"
+handlers = ["tls", "http"]
+port = "443"
 
 [[services.ports]]
-    handlers = ["http"]
-    port = "80"
+handlers = ["http"]
+port = "80"
 
 [services.concurrency]
 type = "connections"
@@ -35,7 +35,6 @@ soft_limit = 6
 #     tls_skip_verify = false
 #     [services.http_checks.headers]
 
-
 [env]
-    ENVIRONMENT = "production"
-    DOCKER_HOST = "unix:///var/run/docker.sock"
+ENVIRONMENT = "production"
+DOCKER_HOST = "unix:///var/run/docker.sock"

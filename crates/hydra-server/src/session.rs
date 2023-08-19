@@ -143,7 +143,7 @@ impl Session {
         let exited = self.exited.clone();
 
         *self.self_destruct_timer.lock() = Some(tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
 
             let count: u32 = app_state
                 .redis

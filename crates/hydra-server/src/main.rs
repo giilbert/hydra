@@ -73,7 +73,16 @@ async fn main() -> Result<()> {
 
     // run if it is not a production environment
     if environment == Environment::Development || !Config::global().use_https {
-        app_without_https_redirect(router.clone(), state.clone()).await;
+        // if it is a fly environment, we need to listen on the 6pn address too
+        if std::env::var("FLY_PRIVATE_IP").is_ok() {
+            tokio::join!(
+                app_listen_on_fly_6pn(router.clone(), state.clone()),
+                app_without_https_redirect(router.clone(), state.clone()),
+            );
+        } else {
+            app_without_https_redirect(router.clone(), state.clone()).await;
+        }
+
         return Ok(());
     }
 
@@ -165,6 +174,25 @@ async fn redirect_http_to_https(ports: Ports) {
 async fn app_without_https_redirect(router: Router<AppState>, state: AppState) {
     let addr = SocketAddr::from(([0, 0, 0, 0], 3100));
     log::info!("Plain HTTP listening on {}", addr);
+    axum::Server::bind(&addr.into())
+        .serve(router.with_state(state).into_make_service())
+        .await
+        .expect("unable to bind to port");
+}
+
+async fn app_listen_on_fly_6pn(router: Router<AppState>, state: AppState) {
+    // bind to fly-local-6pn:3100
+
+    let addr = SocketAddr::from((
+        dns_lookup::lookup_host("fly-local-6pn")
+            .expect("failed to lookup fly-local-6pn")
+            .into_iter()
+            .next()
+            .expect("no addresses found for fly-local-6pn"),
+        3100,
+    ));
+
+    log::info!("HTTP (6PN) listening on {}", addr);
     axum::Server::bind(&addr.into())
         .serve(router.with_state(state).into_make_service())
         .await

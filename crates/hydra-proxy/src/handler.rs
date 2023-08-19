@@ -10,6 +10,7 @@ use axum::{
     response::IntoResponse,
 };
 use hyper::{header, upgrade::OnUpgrade};
+use reqwest::Url;
 use sha1::{Digest, Sha1};
 use shared::ErrorResponseBody;
 use std::sync::Arc;
@@ -90,8 +91,16 @@ pub async fn handler(
                 }
             };
 
+            let is_ipv6 = proxy_ip.contains(':');
+
             accept_websocket_connection(
-                format!("ws://{proxy_ip}:3100/proxy-websocket"),
+                if is_ipv6 {
+                    let ip = format!("ws://[{proxy_ip}]:3100/proxy-websocket");
+                    log::info!("proxying to {ip}");
+                    ip
+                } else {
+                    format!("ws://{proxy_ip}:3100/proxy-websocket")
+                },
                 headers,
                 WebSocketStream::from_raw_socket(upgraded, Role::Server, Some(config)).await,
             )
@@ -117,11 +126,20 @@ pub async fn handler(
         ));
     }
 
+    let is_ipv6 = proxy_ip.contains(':');
+
     let client = reqwest::Client::new();
     let request = client
         .request(
             custom_extract.method,
-            format!("http://{proxy_ip}:3100/proxy"),
+            if is_ipv6 {
+                let ip = format!("http://[{proxy_ip}]:3100/proxy");
+                log::info!("proxying to {ip}");
+
+                ip
+            } else {
+                format!("http://{proxy_ip}:3100/proxy")
+            },
         )
         .headers(headers)
         .body(body)

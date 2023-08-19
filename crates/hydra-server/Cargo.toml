@@ -34,3 +34,4 @@ shared = { path = "../shared" }
 color-eyre = "0.6.2"
 dashmap = "5.5.0"
 thiserror = "1.0.47"
+dns-lookup = "2.0.2"
