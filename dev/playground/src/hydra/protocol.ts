@@ -25,6 +25,7 @@ export interface Request {
 }
 
 export type ClientSent = TaggedEnum<{
+  Ping: undefined;
   Run: undefined;
   PtyInput: { id: number; input: string };
   Crash: undefined;

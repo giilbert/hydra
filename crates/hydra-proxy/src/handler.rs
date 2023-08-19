@@ -10,7 +10,6 @@ use axum::{
     response::IntoResponse,
 };
 use hyper::{header, upgrade::OnUpgrade};
-use reqwest::Url;
 use sha1::{Digest, Sha1};
 use shared::ErrorResponseBody;
 use std::sync::Arc;

@@ -25,6 +25,7 @@ use uuid::Uuid;
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum ClientMessage {
+    Ping,
     PtyInput { id: u32, input: String },
     CreatePty { rows: u16, cols: u16 },
     Run,
@@ -180,6 +181,7 @@ impl Session {
         };
 
         match data {
+            ClientMessage::Ping => {}
             ClientMessage::PtyInput { id, input } => {
                 if let Err(err) = self
                     .container

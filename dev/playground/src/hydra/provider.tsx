@@ -115,8 +115,19 @@ export const HydraProvider: React.FC<{
         ws.current?.addEventListener("open", onOpen);
       });
 
+      const interval = setInterval(() => {
+        if (ws.current)
+          ws.current.send(
+            JSON.stringify({
+              type: "Ping",
+              data: undefined,
+            } satisfies ClientSent)
+          );
+      }, 1000);
+
       return () => {
         console.log("disposing");
+        clearInterval(interval);
         ws.current?.removeEventListener("message", onMessage);
         ws.current?.removeEventListener("close", onClose);
       };

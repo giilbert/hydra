@@ -1,7 +1,4 @@
-use crate::{
-    config::{Config, Environment},
-    AppState,
-};
+use crate::{config::Environment, AppState};
 use axum::{http::Request, middleware::Next, response::Response};
 use std::{
     sync::atomic::{AtomicU64, Ordering},
