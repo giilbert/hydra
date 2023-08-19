@@ -1,5 +1,5 @@
 import { getHydraUrl } from "@/hydra/protocol";
-import { NextRequest, NextResponse } from "next/server";
+import { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 
 const fileSchema = z.object({
@@ -42,25 +42,22 @@ const requestSchema = z
 //   return res.json(data);
 // };
 
-const handler = async (req: NextRequest) => {
+const handler = async (req: NextApiRequest, res: NextApiResponse) => {
   const url = getHydraUrl();
   const requestUrl =
     url + "/execute?api_key=" + (process.env.HYDRA_API_KEY || "hydra");
 
-  const body = requestSchema.safeParse(await req.json());
+  const body = requestSchema.safeParse(req.body);
 
   if (!body.success) {
     // return res.status(400).json({
     //   error: "Invalid request body",
     //   details: body.error,
     // });
-    return NextResponse.json(
-      {
-        error: "Invalid request body",
-        details: body.error,
-      },
-      { status: 400 }
-    );
+    return res.status(400).json({
+      error: "Invalid request body",
+      details: body.error,
+    });
   }
 
   const options = {
@@ -77,18 +74,15 @@ const handler = async (req: NextRequest) => {
   });
 
   if (!hydraResponse.ok) {
-    return NextResponse.json(
-      {
-        error: "Hydra error",
-        details: await hydraResponse.text(),
-      },
-      { status: 500 }
-    );
+    return res.status(500).json({
+      error: "Hydra error",
+      details: await hydraResponse.text(),
+    });
   }
 
   const data: { ticket: string } = await hydraResponse.json();
 
-  return NextResponse.json({ ticket: data.ticket, options });
+  return res.json({ ticket: data.ticket, options });
 };
 
 export default handler;
