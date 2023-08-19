@@ -102,7 +102,7 @@ while True:
               Proxy Link (port 6080)
             </Link>
             <Link
-              href={`https://${ticket}--6080.astrius-ingress.techcodes.org`}
+              href={`https://${ticket}--6080.hydra-ingress.techcodes.org`}
               target="_blank"
               rel="noopener noreferrer"
             >
