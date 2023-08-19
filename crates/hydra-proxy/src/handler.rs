@@ -59,6 +59,8 @@ pub async fn handler(
             .map_err(|_| ErrorPage::error("Something went wrong."))?,
     );
 
+    log::info!("[{session_id}] {} {:#?}", custom_extract.method, uri);
+
     if is_websocket_upgrade {
         if custom_extract.method != Method::GET {
             return Err(ErrorPage::bad_request(
