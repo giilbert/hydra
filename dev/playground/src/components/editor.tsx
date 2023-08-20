@@ -169,7 +169,8 @@ while True:
           placeholder="File name"
           value={input}
           onChange={(e) => {
-            setInput(e.target.value);
+            // replace non-path safe characters with -
+            setInput(e.target.value.replace(/[^a-zA-Z0-9-_\.]/g, "-"));
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
