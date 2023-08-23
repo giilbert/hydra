@@ -16,6 +16,7 @@ use shared::prelude::*;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex;
 use tower::ServiceExt;
+use tower_http::cors::{Any, CorsLayer};
 
 const MAX_BODY_SIZE: usize = 20 * 1024 * 1024; // 20 MB
 
@@ -64,6 +65,13 @@ async fn main() -> Result<()> {
 
     let app = universal_handler
         .layer::<_, _, std::convert::Infallible>(Extension(Arc::new(state)))
+        .layer::<_, _, std::convert::Infallible>(
+            // FIXME: dont allow everything
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_headers(Any)
+                .allow_methods(Any),
+        )
         .layer(DefaultBodyLimit::max(MAX_BODY_SIZE));
 
     axum::Server::bind(&addr.into())

@@ -61,12 +61,6 @@ async fn main() -> Result<()> {
         .route("/proxy", any(proxy_http))
         .route("/proxy-websocket", get(proxy_websocket))
         .with_state(state.clone())
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_headers(Any)
-                .allow_methods(Any),
-        )
         .layer(middleware::from_fn(
             shutdown::update_last_activity_middleware,
         ));
