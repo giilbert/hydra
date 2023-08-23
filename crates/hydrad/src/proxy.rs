@@ -122,25 +122,29 @@ pub enum WebSocketCommands {
 pub async fn open_websocket_connection(
     state: Arc<State>,
     req: ContainerProxyRequest,
-) -> Result<(u32, mpsc::Sender<WebSocketCommands>), String> {
+) -> Result<(u32, mpsc::Sender<WebSocketCommands>), ProxyError> {
     let (websocket_tx, websocket_rx) = mpsc::channel::<WebSocketCommands>(512);
 
     let mut request = Request::builder()
         .method("GET")
         .uri(format!("ws://localhost:{}{}", req.port, req.uri))
         .body(())
-        .map_err(|_| "Error building websocket request")?;
+        .map_err(ProxyError::server_error::<fn(e: http::Error) -> (), _>(
+            "error constructing request",
+        ))?;
     let header_map = request.headers_mut();
     for (k, v) in req.headers {
         header_map.insert(
-            HeaderName::from_str(&k).map_err(|_| "Error parsing header name")?,
-            v.parse().map_err(|_| "Error parsing header value")?,
+            HeaderName::from_str(&k)
+                .map_err(|_| ProxyError::RequestError("invalid header name".to_string()))?,
+            v.parse()
+                .map_err(|_| ProxyError::RequestError("invalid header value".to_string()))?,
         );
     }
 
     let (connection, _) = connect_async(request)
         .await
-        .map_err(|_| "Error connecting to websocket")?;
+        .map_err(|e| ProxyError::UserProgramError(format!("error connecting to program: {e:?}")))?;
 
     let id = WEBSOCKET_ID.fetch_add(1, Ordering::Relaxed);
 

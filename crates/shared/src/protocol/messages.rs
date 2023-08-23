@@ -31,7 +31,7 @@ pub enum ContainerSent {
     },
     WebSocketConnectionResponse {
         req_id: Uuid,
-        ws_id: u32,
+        response: Result<u32, ProxyError>,
     },
     WebSocketMessage {
         ws_id: u32,

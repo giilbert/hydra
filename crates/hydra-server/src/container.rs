@@ -428,7 +428,23 @@ impl Container {
                     );
                 };
             }
-            ContainerSent::WebSocketConnectionResponse { req_id, ws_id } => {
+            ContainerSent::WebSocketConnectionResponse { req_id, response } => {
+                let ws_id = match response {
+                    Ok(ws_id) => ws_id,
+                    Err(e) => {
+                        if let Err(err) = self
+                            .websocket_connection_request_records
+                            .handle_incoming(req_id, Err(e))
+                        {
+                            log::error!(
+                                "[{}] Error handling websocket connection response: {err:#?}",
+                                self.display_id
+                            );
+                        };
+                        return Ok(());
+                    }
+                };
+
                 let connection =
                     WebSocketConnection::new(ws_id, self.stop_rx.clone(), self.commands_tx.clone());
                 let container_tx = connection.container_tx.clone();
@@ -437,6 +453,7 @@ impl Container {
                     .write()
                     .await
                     .insert(ws_id, container_tx);
+
                 if let Err(err) = self
                     .websocket_connection_request_records
                     .handle_incoming(req_id, Ok(connection))

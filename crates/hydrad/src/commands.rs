@@ -9,7 +9,7 @@ use futures_util::{
 };
 use shared::{
     prelude::*,
-    protocol::{ContainerSent, HostSent},
+    protocol::{ContainerSent, HostSent, ProxyError},
 };
 use std::{sync::Arc, time::Duration};
 use tokio::{net::UnixStream, sync::mpsc};
@@ -124,17 +124,17 @@ impl Commands {
                     let _ = self.state.send_ws_message(ws_id, message).await;
                 }
                 HostSent::CreateWebSocketConnection { req_id, req } => {
-                    // FIXME: handle this error in case the websocket does not connect
-                    let (ws_id, commands) = open_websocket_connection(self.state.clone(), req)
+                    let response = open_websocket_connection(self.state.clone(), req)
                         .await
-                        .unwrap();
-
-                    self.state.add_websocket(ws_id, commands);
+                        .map(|(ws_id, commands)| {
+                            self.state.add_websocket(ws_id, commands);
+                            ws_id
+                        });
 
                     self.commands_tx
                         .send_timeout(
                             Command::Send(Message::Binary(rmp_serde::to_vec_named(
-                                &ContainerSent::WebSocketConnectionResponse { req_id, ws_id },
+                                &ContainerSent::WebSocketConnectionResponse { req_id, response },
                             )?)),
                             Duration::from_millis(100),
                         )
