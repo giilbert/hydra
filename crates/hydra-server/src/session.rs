@@ -115,6 +115,21 @@ impl Session {
             mpsc::channel(32);
         let (messages_tx, messages_rx) = mpsc::channel::<Message>(256);
 
+        // get the ip of the machine the container is running on and store it in redis
+        let machine_ip = if std::env::var("FLY_PRIVATE_IP").is_ok() {
+            std::env::var("FLY_PRIVATE_IP").expect("FLY_PRIVATE_IP should be set")
+        } else if std::env::var("DOCKER").is_ok() {
+            "hydra-server".to_string()
+        } else {
+            "localhost".to_string()
+        };
+        let _: () = app_state
+            .redis
+            .write()
+            .await
+            .set_ex(format!("session:{}", ticket), machine_ip, 60 * 60 * 12)
+            .await?;
+
         Ok(Session {
             ticket,
             display_id: format!(
@@ -296,22 +311,6 @@ impl Session {
     pub async fn handle_websocket_connection(self: Arc<Self>, ws: WebSocket) -> Result<()> {
         let mut stop_rx = self.container.on_stop();
         self.cancel_self_destruct();
-
-        // get the ip of the machine the container is running on and store it in redis
-        let machine_ip = if std::env::var("FLY_PRIVATE_IP").is_ok() {
-            std::env::var("FLY_PRIVATE_IP").expect("FLY_PRIVATE_IP should be set")
-        } else if std::env::var("DOCKER").is_ok() {
-            "hydra-server".to_string()
-        } else {
-            "localhost".to_string()
-        };
-        let _: () = self
-            .app_state
-            .redis
-            .write()
-            .await
-            .set_ex(format!("session:{}", self.ticket), machine_ip, 60 * 60 * 12)
-            .await?;
 
         let (mut ws_tx, mut ws_rx) = ws.split();
 

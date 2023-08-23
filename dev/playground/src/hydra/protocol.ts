@@ -5,14 +5,27 @@ export const getHydraUrl = () => {
     return "http://0.0.0.0:3100";
   }
 
-  if (
-    process.env.NODE_ENV === "production" &&
-    process.env.NEXT_PUBLIC_HYDRA_URL
-  ) {
-    return process.env.NEXT_PUBLIC_HYDRA_URL as string;
+  if (process.env.NODE_ENV === "production" && process.env.HYDRA_SERVER_URL) {
+    return process.env.HYDRA_SERVER_URL as string;
   }
 
   throw new Error("Cannot determine HYDRA_URL");
+};
+
+// for client side websocket + proxy requests
+export const getHydraProxyUrl = () => {
+  if (process.env.NODE_ENV === "development") {
+    return "http://localhost:3101";
+  }
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.NEXT_PUBLIC_HYDRA_PROXY_URL
+  ) {
+    return process.env.NEXT_PUBLIC_HYDRA_PROXY_URL as string;
+  }
+
+  throw new Error("Cannot determine HYDRA_PROXY_URL");
 };
 
 export interface File {

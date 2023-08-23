@@ -4,11 +4,11 @@ use axum::{
 };
 use http::StatusCode;
 
+#[derive(Debug)]
 pub struct ErrorPage {
     pub status_code: StatusCode,
     pub message: String,
 }
-
 impl ErrorPage {
     pub fn not_found(message: impl Into<String>) -> Self {
         ErrorPage {
@@ -89,6 +89,7 @@ fn create_html(status_code: StatusCode, message: &str) -> String {
 impl IntoResponse for ErrorPage {
     fn into_response(self) -> Response {
         let body = create_html(self.status_code, &self.message);
+        log::info!("error page: {self:?}");
         Response::builder()
             .status(self.status_code)
             .header("Content-Type", "text/html; charset=utf-8")

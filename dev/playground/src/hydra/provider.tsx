@@ -10,7 +10,7 @@ import {
 import { Emitter } from "strict-event-emitter";
 import {
   File,
-  getHydraUrl,
+  getHydraProxyUrl,
   ClientSent,
   createRunRequest,
   ServerSent,
@@ -82,7 +82,7 @@ export const HydraProvider: React.FC<{
 
       ticket.current = data.ticket;
       ws.current = new WebSocket(
-        `${getHydraUrl().replace("http", "ws")}/execute?ticket=` +
+        `${getHydraProxyUrl().replace("http", "ws")}/execute?ticket=` +
           ticket.current
       );
 

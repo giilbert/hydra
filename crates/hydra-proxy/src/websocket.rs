@@ -10,8 +10,6 @@ pub async fn accept_websocket_connection(
 ) {
     let (mut client_tx, mut client_rx) = ws.split();
 
-    log::info!("accepted websocket connection {}", proxy_url);
-
     // make a request to the proxy server with headers and uri
     // the proxy server will respond with a websocket connection
     let mut request = Request::builder()
@@ -28,8 +26,6 @@ pub async fn accept_websocket_connection(
             return;
         }
     };
-
-    log::info!("accepted websocket connection");
 
     let (mut server_tx, mut server_rx) = connection.split();
 

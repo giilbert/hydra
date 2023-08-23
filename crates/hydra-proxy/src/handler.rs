@@ -1,19 +1,26 @@
 use crate::{
-    discovery::resolve_server_ip, error_page::ErrorPage, websocket::accept_websocket_connection,
-    AppState,
+    discovery::resolve_server_authority, error_page::ErrorPage,
+    websocket::accept_websocket_connection, AppState,
 };
 use axum::{
     async_trait,
     body::Bytes,
-    extract::{FromRequestParts, Host, State},
+    extract::{FromRequestParts, Host, Query, WebSocketUpgrade},
     http::{request::Parts, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     response::IntoResponse,
+    Extension,
 };
+use futures_util::{SinkExt, StreamExt};
+use http::Request;
 use hyper::{header, upgrade::OnUpgrade};
 use sha1::{Digest, Sha1};
-use shared::ErrorResponseBody;
+use shared::{
+    prelude::*, protocol::WebSocketMessage as SharedWebSocketMessage, ErrorResponse,
+    ErrorResponseBody,
+};
 use std::sync::Arc;
 use tokio_tungstenite::{
+    connect_async,
     tungstenite::protocol::{Role, WebSocketConfig},
     WebSocketStream,
 };
@@ -30,8 +37,8 @@ fn sign(key: &[u8]) -> HeaderValue {
 }
 
 #[axum::debug_handler]
-pub async fn handler(
-    app_state: State<Arc<AppState>>,
+pub async fn container_proxy_handler(
+    Extension(app_state): Extension<Arc<AppState>>,
     mut custom_extract: CustomExtract,
     uri: Uri,
     Host(host): Host,
@@ -44,8 +51,9 @@ pub async fn handler(
         .unwrap_or(false);
 
     let ParsedHost { session_id } = ParsedHost::parse(host)?;
+    log::info!("[{session_id}] {} {:#?}", custom_extract.method, uri);
 
-    let proxy_ip = resolve_server_ip(&app_state, &session_id)
+    let proxy_authority = resolve_server_authority(&app_state, &session_id)
         .await
         .map_err(|e| {
             log::error!("error resolving server url: {e}");
@@ -58,8 +66,6 @@ pub async fn handler(
         HeaderValue::from_str(&uri.to_string())
             .map_err(|_| ErrorPage::error("Something went wrong."))?,
     );
-
-    log::info!("[{session_id}] {} {:#?}", custom_extract.method, uri);
 
     if is_websocket_upgrade {
         if custom_extract.method != Method::GET {
@@ -90,16 +96,11 @@ pub async fn handler(
                 }
             };
 
-            let is_ipv6 = proxy_ip.contains(':');
+            let proxy_url = format!("ws://{proxy_authority}/proxy-websocket");
+            log::info!("[{session_id}] ws connection -> {proxy_url}");
 
             accept_websocket_connection(
-                if is_ipv6 {
-                    let ip = format!("ws://[{proxy_ip}]:3100/proxy-websocket");
-                    log::info!("proxying to {ip}");
-                    ip
-                } else {
-                    format!("ws://{proxy_ip}:3100/proxy-websocket")
-                },
+                proxy_url,
                 headers,
                 WebSocketStream::from_raw_socket(upgraded, Role::Server, Some(config)).await,
             )
@@ -125,20 +126,11 @@ pub async fn handler(
         ));
     }
 
-    let is_ipv6 = proxy_ip.contains(':');
-
     let client = reqwest::Client::new();
     let request = client
         .request(
             custom_extract.method,
-            if is_ipv6 {
-                let ip = format!("http://[{proxy_ip}]:3100/proxy");
-                log::info!("proxying to {ip}");
-
-                ip
-            } else {
-                format!("http://{proxy_ip}:3100/proxy")
-            },
+            format!("http://{proxy_authority}/proxy"),
         )
         .headers(headers)
         .body(body)
@@ -225,4 +217,110 @@ impl ParsedHost {
 
         Ok(ParsedHost { session_id })
     }
+}
+
+#[derive(Deserialize)]
+pub struct WebSocketQueryParams {
+    ticket: Uuid,
+}
+
+pub async fn client_websocket_handler(
+    Extension(state): Extension<Arc<AppState>>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+    Query(query): Query<WebSocketQueryParams>,
+) -> Result<impl IntoResponse, ErrorResponse> {
+    let server_authority = resolve_server_authority(&state, &query.ticket)
+        .await
+        .map_err(|e| {
+            log::error!("error resolving server url: {e}");
+            ErrorResponse::error("Something went wrong.")
+        })?
+        .ok_or_else(|| ErrorResponse::not_found("Session not found."))?;
+
+    let mut builder = Request::builder().uri(format!(
+        "ws://{server_authority}/execute?ticket={}",
+        query.ticket
+    ));
+    for (key, value) in headers {
+        if let Some(key) = key {
+            builder = builder.header(key, value);
+        }
+    }
+    let request = builder.body(()).expect("request builder is valid");
+
+    let (server_ws, _response) = connect_async(request).await.map_err(|e| {
+        match e {
+            tokio_tungstenite::tungstenite::Error::Http(response) => {
+                log::error!("error connecting to server websocket {response:#?}");
+                let body_text = response
+                    .body()
+                    .as_ref()
+                    .map(|b| String::from_utf8_lossy(b).to_string())
+                    .unwrap_or_else(|| "[error reading body]".to_string());
+                log::error!("body text: {body_text}");
+            }
+            _ => log::error!("error connecting to server websocket {e:#?}"),
+        }
+
+        ErrorResponse::error("Something went wrong.")
+    })?;
+
+    Ok(ws.on_upgrade(|ws| async move {
+        let (mut server_tx, mut server_rx) = server_ws.split();
+        let (mut client_tx, mut client_rx) = ws.split();
+
+        // forward server_rx messages to client_tx
+        loop {
+            tokio::select! {
+                server_msg = server_rx.next() => {
+                    match server_msg {
+                        Some(Ok(msg)) => {
+                            let msg = SharedWebSocketMessage::from(msg);
+                            if let Err(e) = client_tx.send(msg.into()).await {
+                                log::error!("error sending to client websocket: {e}");
+                                break;
+                            }
+                        }
+                        Some(Err(e)) => {
+                            log::error!("error reading from server websocket: {e}");
+                            break;
+                        }
+                        None => {
+                            break;
+                        }
+                    }
+                },
+                client_msg = client_rx.next() => {
+                    match client_msg {
+                        Some(Ok(msg)) => {
+                            let msg = SharedWebSocketMessage::from(msg);
+                            if let Err(e) = server_tx.send(msg.into()).await {
+                                log::error!("error sending to server websocket: {e}");
+                                break;
+                            }
+                        }
+                        Some(Err(e)) => {
+                            log::error!("error reading from client websocket: {e}");
+                            break;
+                        }
+                        None => {
+                            break;
+                        }
+                    }
+                },
+            }
+        }
+
+        let _ = server_tx
+            .reunite(server_rx)
+            .expect("pairs are matching")
+            .close(None)
+            .await;
+        let _ = client_tx
+            .reunite(client_rx)
+            .expect("pairs are matching")
+            .close()
+            .await;
+    }))
 }

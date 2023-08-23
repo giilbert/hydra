@@ -12,7 +12,7 @@ thread_local! {
     ));
 }
 
-pub async fn resolve_server_ip(state: &AppState, session_id: &Uuid) -> Result<Option<String>> {
+async fn resolve_server_ip(state: &AppState, session_id: &Uuid) -> Result<Option<String>> {
     if let Some(server_url) = CACHE.with(|c| {
         let mut cache = c.borrow_mut();
         cache.get(session_id).cloned()
@@ -31,4 +31,24 @@ pub async fn resolve_server_ip(state: &AppState, session_id: &Uuid) -> Result<Op
     }
 
     Ok(server_ip)
+}
+
+pub async fn resolve_server_authority(
+    state: &AppState,
+    session_id: &Uuid,
+) -> Result<Option<String>> {
+    let server_ip = match resolve_server_ip(state, session_id).await? {
+        Some(server_ip) => server_ip,
+        None => return Ok(None),
+    };
+
+    let is_ipv6 = server_ip.contains(':');
+
+    if is_ipv6 {
+        let ip = format!("[{server_ip}]:3100");
+        log::info!("proxying to {ip}");
+        Ok(Some(ip))
+    } else {
+        Ok(Some(format!("{server_ip}:3100")))
+    }
 }
