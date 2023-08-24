@@ -1,5 +1,7 @@
 # hydra
 
+![amazing diagram](/assets/diagram.png)
+
 ### TODOs:
 
 - Make building base images not slow (copy /bin/hydrad to output)
