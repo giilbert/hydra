@@ -24,8 +24,13 @@ impl State {
         }
     }
 
-    pub fn get_pty(&self, id: u32) -> Option<mpsc::Sender<PtyCommands>> {
-        self.ptys.lock().get(&id).cloned()
+    pub async fn send_pty_command(&self, id: u32, command: PtyCommands) -> Result<()> {
+        let lock = self.ptys.lock();
+        lock.get(&id)
+            .ok_or_else(|| eyre!("No pty found for id: {}", id))?
+            .send(command)
+            .await?;
+        Ok(())
     }
 
     pub fn register_pty(&self, pty: mpsc::Sender<PtyCommands>) -> u32 {
@@ -42,12 +47,9 @@ impl State {
         self.websocket_commands.write().insert(id, websocket);
     }
 
-    pub fn get_websocket(&self, id: u32) -> Option<mpsc::Sender<WebSocketCommands>> {
-        self.websocket_commands.read().get(&id).cloned()
-    }
-
     pub async fn send_ws_message(&self, id: u32, command: WebSocketMessage) -> Result<()> {
-        self.get_websocket(id)
+        let lock = self.websocket_commands.read();
+        lock.get(&id)
             .ok_or_else(|| eyre!("No websocket found for id: {}", id))?
             .send(WebSocketCommands::Send(command))
             .await?;

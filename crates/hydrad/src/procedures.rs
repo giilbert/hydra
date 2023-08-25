@@ -27,15 +27,10 @@ pub async fn handle_rpc_procedure(
 
             return Ok(Ok(json!(id)));
         }
-        ContainerRpcRequest::PtyInput { pty_id: id, input } => {
-            // panic!();
-            let pty = state.get_pty(id).ok_or_else(|| eyre!("cannot find pty"))?;
-
-            pty.send(pty::PtyCommands::Input(pty::PtyInput::Text(
-                input.to_string(),
-            )))
-            .await?;
-
+        ContainerRpcRequest::PtyInput { pty_id, input } => {
+            state
+                .send_pty_command(pty_id, pty::PtyCommands::Input(pty::PtyInput::Text(input)))
+                .await?;
             return Ok(Ok(json!({})));
         }
         ContainerRpcRequest::SetupFromOptions { options } => {
