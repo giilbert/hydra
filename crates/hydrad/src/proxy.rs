@@ -129,9 +129,7 @@ pub async fn open_websocket_connection(
         .method("GET")
         .uri(format!("ws://localhost:{}{}", req.port, req.uri))
         .body(())
-        .map_err(ProxyError::server_error::<fn(e: http::Error) -> (), _>(
-            "error constructing request",
-        ))?;
+        .map_err(ProxyError::server_error("error constructing request"))?;
     let header_map = request.headers_mut();
     for (k, v) in req.headers {
         header_map.insert(

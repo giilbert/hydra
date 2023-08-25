@@ -28,7 +28,7 @@ pub enum ProxyError {
 }
 
 impl ProxyError {
-    pub fn server_error<F, E>(message: impl ToString) -> impl Fn(E) -> Self
+    pub fn server_error<E>(message: impl ToString) -> impl Fn(E) -> Self
     where
         E: Error,
     {

@@ -310,10 +310,9 @@ impl Container {
                 req,
             }))
             .await
-            .map_err(ProxyError::server_error::<
-                fn(SendError<ContainerCommands>) -> ProxyError,
-                _,
-            >("failed to send proxy request message"))?;
+            .map_err(ProxyError::server_error(
+                "failed to send proxy request message",
+            ))?;
 
         log::debug!("[{}]: waiting for proxy response", self.display_id);
 
@@ -347,10 +346,9 @@ impl Container {
                 HostSent::CreateWebSocketConnection { req_id, req },
             ))
             .await
-            .map_err(ProxyError::server_error::<
-                fn(SendError<ContainerCommands>) -> ProxyError,
-                _,
-            >("failed to send proxy request message"))?;
+            .map_err(ProxyError::server_error(
+                "failed to send proxy request message",
+            ))?;
 
         let response = self
             .websocket_connection_request_records
